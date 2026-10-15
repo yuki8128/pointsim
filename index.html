@@ -570,7 +570,7 @@ function refresh() { save(); renderSummary(); }
 
 /* ---------- 楽天ウェブサービス 商品検索API ---------- */
 function statusHtml(it) {
-  if (it.status === "loading") return '<span class="spin" aria-hidden="true"></span><span>商品情報を取得中…</span>';
+  if (it.status === "loading") return `<span class="spin" aria-hidden="true"></span><span>${esc(it.progress || "商品情報を取得中…")}</span>`;
   if (it.status === "err") return `<span class="err">${esc(it.errMsg)}</span>`;
   if (it.status !== "ok") return "";
   const bits = [];
@@ -616,7 +616,7 @@ function enqueue(it) {
     return;
   }
   if (p.shop.startsWith("sample-")) return;
-  it.status = "loading";
+  it.status = "loading"; it.progress = "";
   if (!queue.includes(it.id)) queue.push(it.id);
   if (!running) runQueue();
 }
@@ -626,11 +626,17 @@ async function runQueue() {
     const id = queue.shift();
     const it = state.items.find(x => x.id === id);
     if (!it) continue;
-    try { applyItem(it, await lookup(parseUrl(it.url))); }
+    try {
+      applyItem(it, await lookup(parseUrl(it.url), msg => {
+        it.progress = msg;
+        const el = document.querySelector(`.item[data-id="${it.id}"] .item-status span:last-child`);
+        if (el) el.textContent = msg;
+      }));
+    }
     catch (e) {
-      it.status = "err";
+      it.status = "err"; it.progress = "";
       it.errMsg = e.code === "too_many_requests" ? "アクセスが集中しています。少し待って「価格と倍率を取り直す」を押してください。"
-        : e.notFound ? "このURLから商品を特定できませんでした（販売終了や、APIで検索できない商品番号のことがあります）。価格とショップUPを手で入力してください。"
+        : e.notFound ? "このURLから商品を特定できませんでした。販売終了か、商品数の多いショップ（300件を超える）の可能性があります。価格とショップUPを手で入力してください。"
         : /REFERRER|NOT_ALLOWED/.test(e.code || "") ? "このページのドメインは楽天ウェブサービスに許可されていないため、自動取得できません。"
         : "商品情報を取得できませんでした。価格とショップUPを手で入力してください。";
     }
@@ -639,7 +645,8 @@ async function runQueue() {
   running = false;
   $("fetchMsg").textContent = "";
 }
-async function lookup(p) {
+const SHOP_SCAN_PAGES = 10; // 30件×10ページ＝300商品まで。毎秒1件の制限があるので最大10秒ほどかかる
+async function lookup(p, onProgress) {
   // APIの itemCode は「ショップ:数字の商品ID」で、URLの商品管理番号とは別物。どちらも itemUrl で照合する
   const want = `/${p.shop}/${p.code}/`;
   const match = list => (list || []).find(x => (x.itemUrl || "").split("?")[0].includes(want));
@@ -653,6 +660,16 @@ async function lookup(p) {
   for (const kw of words) {
     try { const hit = match((await callApi({ shopCode: p.shop, keyword: kw, hits: 30 })).Items); if (hit) return hit; }
     catch (e) { if (!soft(e)) throw e; }
+  }
+  // キーワード検索は商品名・説明文しか見ないので、最後にショップの商品一覧を順にめくってURLで照合する
+  for (let page = 1; page <= SHOP_SCAN_PAGES; page++) {
+    if (onProgress) onProgress(`ショップの商品一覧から探しています（${page * 30}件目まで）…`);
+    let d;
+    try { d = await callApi({ shopCode: p.shop, hits: 30, page }); }
+    catch (e) { if (soft(e)) break; throw e; }
+    const hit = match(d.Items);
+    if (hit) return hit;
+    if (page >= (d.pageCount || 1)) break;
   }
   const e = new Error("not found"); e.notFound = true; throw e;
 }
@@ -671,7 +688,7 @@ function applyItem(it, x) {
   it.postageFlag = x.postageFlag;
   const d = new Date();
   it.fetchedAt = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  it.status = "ok"; it.errMsg = "";
+  it.status = "ok"; it.errMsg = ""; it.progress = "";
 }
 
 /* ---------- イベント ---------- */
