@@ -143,6 +143,8 @@ button.ghost:hover { color: var(--ink); background: var(--sunken); }
 .kpis div { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .kpis small { display: block; font-family: var(--font-body); font-size: 11px; color: var(--muted); }
 .kpis b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpis b + small { margin-top: 2px; font-size: 10.5px; }
+.kpis small.loss { color: var(--warn); }
 .lines { width: 100%; border-collapse: collapse; margin-top: 10px; font-variant-numeric: tabular-nums; }
 .lines td { padding: 4px 0; vertical-align: top; }
 .lines td:first-child { font-family: var(--font-body); padding-right: 8px; }
@@ -386,7 +388,8 @@ function calc(s) {
   s.spu.filter(r => r.on).forEach(r => lines.push({ ...ruleLine(r), group: "SPU" }));
 
   const shopPts = groups.reduce((a, g) => a + g.shopPts, 0);
-  if (shopPts > 0) lines.push({ label: "ショップ独自倍率", mult: null, pts: shopPts, group: "shop" });
+  const shopUpW = cartEx ? s.items.reduce((a, it) => a + exOf(it) * Math.max(0, +it.shopUp || 0), 0) / cartEx : 0;
+  if (shopPts > 0) lines.push({ label: "ショップUP", mult: shopUpW, pts: shopPts, raw: shopPts, group: "shop" });
 
   let camp = null;
   if (s.mode !== "none") {
@@ -399,16 +402,21 @@ function calc(s) {
     const rawAll = Math.floor((priorEx + cartEx) * Math.max(0, n - 1) / 100);
     const before = lim(Math.floor(priorEx * Math.max(0, prior - 1) / 100));
     const after = lim(rawAll);
-    camp = { qualifying, prior, n, pts: after - before, capped: cap > 0 && rawAll > cap, cap, priorEx };
-    lines.push({ label: (s.mode === "sale" ? "スーパーSALE" : "お買い物マラソン") + `（${n}店舗）`, mult: Math.max(0, n - 1), pts: camp.pts, capped: camp.capped, group: "camp" });
+    const rawDelta = rawAll - Math.floor(priorEx * Math.max(0, prior - 1) / 100);
+    const nextGain = n < 10 ? lim(Math.floor((priorEx + cartEx) * n / 100)) - after : 0;
+    camp = { qualifying, prior, n, pts: after - before, capped: cap > 0 && rawAll > cap, cap, priorEx, nextGain };
+    lines.push({ label: (s.mode === "sale" ? "スーパーSALE" : "お買い物マラソン") + `（${n}店舗）`, mult: Math.max(0, n - 1), pts: camp.pts, raw: rawDelta, capped: camp.capped, group: "camp" });
   }
   s.extras.filter(r => r.on).forEach(r => lines.push({ ...ruleLine(r), group: "extra" }));
 
   const computed = lines.reduce((a, l) => a + l.pts, 0);
   const override = s.ovOn ? Math.floor(cartEx * (+s.ovVal || 0) / 100) : null;
   const total = override ?? computed;
+  // 楽天の「今この商品はポイント○倍」と同じく、上限を考えない倍率の単純合計
+  const dispMult = override !== null ? (+s.ovVal || 0) : lines.reduce((a, l) => a + (l.mult || 0), 0);
+  const capLoss = override !== null ? 0 : lines.reduce((a, l) => a + Math.max(0, (l.raw ?? l.pts) - l.pts), 0);
   return {
-    groups, cartIncl, cartEx, lines, camp, computed, override, total,
+    groups, cartIncl, cartEx, lines, camp, computed, override, total, dispMult, capLoss,
     rate: cartIncl ? total / cartIncl * 100 : 0,
     mult: cartEx ? total / cartEx * 100 : 0,
     net: cartIncl - total,
@@ -522,12 +530,12 @@ function renderSummary() {
   $("receipt").innerHTML = `
     <div class="kicker">獲得予定ポイント</div>
     <div class="big"><b>${num(r.total)}</b><span>pt</span></div>
-    <div class="kicker">${state.items.length}商品・${r.groups.length}ショップ／お支払い ${yen(r.cartIncl)}</div>
+    <div class="kicker">${state.items.length}商品・${r.groups.length}ショップ／お支払い ${yen(r.cartIncl)}（税抜 ${yen(r.cartEx)}）</div>
     <div class="kpis">
-      <div><small>実質倍率（税抜比）</small><b>${fmtMul(r.mult)}倍</b></div>
+      <div><small>表示倍率（上限なし）</small><b>${fmtMul(r.dispMult)}倍</b><small>楽天の「ポイント○倍」と同じ数え方</small></div>
+      <div><small>実質倍率（上限込み）</small><b>${fmtMul(r.mult)}倍</b>${r.capLoss > 0 ? `<small class="loss">上限で −${num(r.capLoss)}pt</small>` : "<small>上限による目減りなし</small>"}</div>
       <div><small>還元率（税込比）</small><b>${(Math.round(r.rate * 10) / 10).toFixed(1)}%</b></div>
       <div><small>ポイント差引後</small><b>${yen(r.net)}</b></div>
-      <div><small>税抜合計</small><b>${yen(r.cartEx)}</b></div>
     </div>
     <table class="lines">
       ${rows}
@@ -541,12 +549,15 @@ function renderSummary() {
 function renderHints(r) {
   const h = [];
   if (r.camp) {
-    const short = r.groups.filter(g => g.incl > 0 && g.incl < 1000);
-    short.forEach(g => h.push(["w", `${g.name} はあと${yen(1000 - g.incl)}で買いまわり1店舗に数えられます。`]));
-    if (r.camp.n < 10) h.push(["", `あと${10 - r.camp.n}店舗（各1,000円以上）で買いまわり最大の+9倍です。次の1店舗で+1倍上がると、およそ${num(Math.floor((r.camp.priorEx + r.cartEx) / 100))}pt増えます。`]);
-    else h.push(["", "買いまわりは10店舗に到達しています。"]);
-    if (r.camp.capped) h.push(["w", `買いまわり特典が上限${num(r.camp.cap)}ptに達しています。ここから先の買い物には買いまわり分が付きません。`]);
-    else if (r.camp.n > 1 && r.camp.cap > 0) {
+    if (r.camp.capped) {
+      h.push(["w", `買いまわり特典が上限${num(r.camp.cap)}ptに達しています。店舗を増やしても、買い物を増やしても、買いまわり分はこれ以上付きません。`]);
+    } else {
+      const short = r.groups.filter(g => g.incl > 0 && g.incl < 1000);
+      short.forEach(g => h.push(["w", `${g.name} はあと${yen(1000 - g.incl)}で買いまわり1店舗に数えられます。`]));
+      if (r.camp.n >= 10) h.push(["", "買いまわりは10店舗に到達しています。"]);
+      else if (r.camp.nextGain > 0) h.push(["", `あと${10 - r.camp.n}店舗（各1,000円以上）で買いまわり最大の+9倍です。次の1店舗で+1倍上がると、今のカゴの分だけでおよそ${num(r.camp.nextGain)}pt増えます${r.camp.nextGain < Math.floor((r.camp.priorEx + r.cartEx) / 100) ? "（上限で頭打ち）" : ""}。`]);
+    }
+    if (!r.camp.capped && r.camp.n > 1 && r.camp.cap > 0) {
       const room = Math.ceil(r.camp.cap * 100 / (r.camp.n - 1)) - (r.camp.priorEx + r.cartEx);
       if (room > 0) h.push(["", `今の倍率なら、買いまわり上限まであと税抜${yen(room)}分買えます。`]);
     }
