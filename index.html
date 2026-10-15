@@ -95,6 +95,10 @@ button.ghost:hover { color: var(--ink); background: var(--sunken); }
   .item-fields .f-del { grid-column: span 1; }
 }
 .del { padding: 6px; width: 34px; height: 36px; line-height: 1; }
+.item-eff { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; padding: 8px 10px; border-radius: 7px; background: var(--accent-soft); font-variant-numeric: tabular-nums; }
+.item-eff:empty { display: none; }
+.item-eff b { font-family: var(--font-num); font-size: 17px; font-weight: 600; color: var(--ink); }
+.item-eff .sub { color: var(--muted); font-size: 12px; font-family: var(--font-num); }
 .empty { padding: 28px 12px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
 
 /* switches */
@@ -420,7 +424,21 @@ function calc(s) {
     rate: cartIncl ? total / cartIncl * 100 : 0,
     mult: cartEx ? total / cartEx * 100 : 0,
     net: cartIncl - total,
+    perItem: allocate(s, total - (override !== null ? 0 : shopPts), override !== null, cartEx),
   };
+}
+
+// 商品ごとの実質価格：ショップUP分はその商品に、残り（SPU・キャンペーン等）は税抜額の比率で配分する
+function allocate(s, commonPts, ignoreShopUp, cartEx) {
+  const out = {};
+  s.items.forEach(it => {
+    const ex = exOf(it), incl = inclOf(it);
+    const own = ignoreShopUp ? 0 : Math.floor(ex * Math.max(0, +it.shopUp || 0) / 100);
+    const pts = Math.round(own + (cartEx ? commonPts * ex / cartEx : 0));
+    const qty = Math.max(1, +it.qty || 1);
+    out[it.id] = { pts, net: incl - pts, unit: (incl - pts) / qty, qty, mult: ex ? pts / ex * 100 : 0, incl };
+  });
+  return out;
 }
 
 /* ---------- 描画 ---------- */
@@ -477,6 +495,7 @@ function itemHtml(it) {
       <div class="f-mul"><label for="x-${it.id}">ショップUP（+倍）</label><input type="number" id="x-${it.id}" data-k="shopUp" min="0" step="1" value="${esc(it.shopUp)}"></div>
       <div class="f-del"><button type="button" class="ghost del" data-del="${it.id}" aria-label="この商品を削除">✕</button></div>
     </div>
+    <div class="item-eff" data-eff="${it.id}"></div>
   </div>`;
 }
 
@@ -543,6 +562,13 @@ function renderSummary() {
       <tr class="sep total"><td>合計</td><td class="m"></td><td class="p">${num(r.total)} pt</td></tr>
     </table>`;
   renderHints(r);
+  document.querySelectorAll("[data-eff]").forEach(el => {
+    const e = r.perItem[el.dataset.eff];
+    if (!e || !e.incl) { el.innerHTML = ""; return; }
+    el.innerHTML = `<span>実質</span><b>${yen(e.net)}</b>` +
+      (e.qty > 1 ? `<span>（1個あたり ${yen(e.unit)}）</span>` : "") +
+      `<span class="sub">${yen(e.incl)} − ${num(e.pts)}pt・${fmtMul(e.mult)}倍</span>`;
+  });
   updateShopHeads();
 }
 
