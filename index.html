@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="楽天市場の商品URLを貼るだけで、SPU・お買い物マラソン・5と0のつく日などを加味した獲得ポイントを購入前に計算します。">
+<title>ポイント皮算用</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: 左に「カゴ」と「倍率スイッチ」、右にレシート風の集計を固定。狭い画面では集計が先頭に来る */
+:root {
+  --bg: #eef0ec;
+  --surface: #fbfcf9;
+  --sunken: #e4e7e1;
+  --ink: #1c2329;
+  --muted: #5d6a70;
+  --line: #cfd5cc;
+  --accent: #0e7a64;
+  --accent-ink: #ffffff;
+  --accent-soft: #d5ebe3;
+  --marker: #ffe36b;
+  --warn: #a5560b;
+  --warn-soft: #fbead2;
+  --receipt: #ffffff;
+  --font-display: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141a1d; --surface: #1c2428; --sunken: #11171a; --ink: #e6ebe7; --muted: #95a3a6;
+    --line: #2f3a3f; --accent: #3fc2a0; --accent-ink: #08201a; --accent-soft: #173b33;
+    --marker: #6b5a12; --warn: #f0a85a; --warn-soft: #3a2a17; --receipt: #20292d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141a1d; --surface: #1c2428; --sunken: #11171a; --ink: #e6ebe7; --muted: #95a3a6;
+  --line: #2f3a3f; --accent: #3fc2a0; --accent-ink: #08201a; --accent-soft: #173b33;
+  --marker: #6b5a12; --warn: #f0a85a; --warn-soft: #3a2a17; --receipt: #20292d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 64px; }
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 20px; }
+header.top h1 { font-family: var(--font-display); font-weight: 900; font-size: clamp(24px, 4vw, 32px); margin: 0; letter-spacing: .02em; text-wrap: balance; }
+header.top h1 span { background: linear-gradient(transparent 60%, var(--marker) 60%); }
+header.top p { margin: 0; color: var(--muted); font-size: 13px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } .summary { order: -1; position: static !important; } }
+section.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.col { display: grid; gap: 20px; min-width: 0; }
+h2 { font-family: var(--font-display); font-weight: 700; font-size: 17px; margin: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+h2 small, .note { font-weight: 400; font-size: 12px; color: var(--muted); }
+h3 { font-size: 13px; font-weight: 700; margin: 4px 0 0; color: var(--muted); letter-spacing: .08em; }
+input, select, textarea, button { font: inherit; color: inherit; }
+input[type="text"], input[type="number"], input[type="url"], textarea, select {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; width: 100%; min-width: 0;
+}
+input[type="number"] { font-family: var(--font-num); text-align: right; }
+textarea { resize: vertical; min-height: 64px; font-family: var(--font-num); font-size: 13px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button { cursor: pointer; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); padding: 7px 12px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+button.ghost:hover { color: var(--ink); background: var(--sunken); }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); letter-spacing: .05em; }
+
+/* items */
+.shop { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.shop-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--sunken); font-size: 13px; }
+.shop-head b { font-family: var(--font-num); font-weight: 600; }
+.chip { font-size: 12px; padding: 1px 9px; border-radius: 99px; font-weight: 700; white-space: nowrap; }
+.chip.ok { background: var(--accent-soft); color: var(--accent); }
+.chip.ng { background: var(--warn-soft); color: var(--warn); }
+.item { display: grid; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+.item:first-of-type { border-top: 0; }
+.item-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 108px 64px 82px 84px 34px; gap: 8px; align-items: end; }
+.item-fields label, .fld label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; white-space: nowrap; }
+.item-url { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.item-url a { font-size: 12px; color: var(--accent); white-space: nowrap; padding-bottom: 8px; }
+@media (max-width: 640px) {
+  .item-fields { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .item-fields .f-name { grid-column: span 6; }
+  .item-fields .f-shop { grid-column: span 6; }
+  .item-fields .f-price { grid-column: span 3; }
+  .item-fields .f-qty { grid-column: span 3; }
+  .item-fields .f-tax { grid-column: span 2; }
+  .item-fields .f-mul { grid-column: span 3; }
+  .item-fields .f-del { grid-column: span 1; }
+}
+.del { padding: 6px; width: 34px; height: 36px; line-height: 1; }
+.empty { padding: 28px 12px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
+
+/* switches */
+.rules { display: grid; gap: 2px; }
+.rule { display: grid; grid-template-columns: 44px minmax(0, 1fr) 84px 96px; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px dashed var(--line); }
+.rule:last-child { border-bottom: 0; }
+.rule .nm { font-size: 14px; min-width: 0; }
+.rule .nm small { display: block; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.rule .nm input[type="text"] { padding: 4px 7px; }
+.rule .num { display: grid; gap: 0; }
+.rule .num span { font-size: 10px; color: var(--muted); text-align: right; }
+.rule .num input { padding: 4px 7px; }
+.rules-head { display: grid; grid-template-columns: 44px minmax(0, 1fr) 84px 96px; gap: 10px; font-size: 11px; color: var(--muted); padding: 0 4px; }
+.rules-head span:nth-child(n+3) { text-align: right; }
+@media (max-width: 520px) {
+  .rule, .rules-head { grid-template-columns: 44px minmax(0, 1fr) 70px 80px; gap: 6px; }
+}
+.switch { position: relative; width: 40px; height: 24px; display: inline-block; }
+.switch input { opacity: 0; position: absolute; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch i { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: background .15s; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(16px); }
+.switch input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rule.off .nm, .rule.off .num { opacity: .5; }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+.seg label { padding: 6px 14px; cursor: pointer; font-size: 14px; border-right: 1px solid var(--line); position: relative; }
+.seg label:last-child { border-right: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label:has(input:checked) { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fields-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 520px) { .fields-3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* summary receipt */
+.summary { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); display: grid; gap: 14px; }
+.receipt { background: var(--receipt); border: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0; padding: 20px 20px 26px; font-family: var(--font-num); font-size: 13px; position: relative;
+  -webkit-mask: radial-gradient(circle 7px at 8px 100%, transparent 6.5px, #000 7px) 0 0 / 16px 100% repeat-x;
+          mask: radial-gradient(circle 7px at 8px 100%, transparent 6.5px, #000 7px) 0 0 / 16px 100% repeat-x; }
+.receipt .kicker { font-family: var(--font-body); font-size: 12px; color: var(--muted); letter-spacing: .1em; }
+.big { display: flex; align-items: baseline; gap: 6px; margin: 2px 0 2px; }
+.big b { font-size: 44px; font-weight: 600; line-height: 1.1; letter-spacing: -.02em; background: linear-gradient(transparent 62%, var(--marker) 62%); font-variant-numeric: tabular-nums; }
+.big span { font-family: var(--font-body); font-size: 14px; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 6px; }
+.kpis div { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.kpis small { display: block; font-family: var(--font-body); font-size: 11px; color: var(--muted); }
+.kpis b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lines { width: 100%; border-collapse: collapse; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.lines td { padding: 4px 0; vertical-align: top; }
+.lines td:first-child { font-family: var(--font-body); padding-right: 8px; }
+.lines td.m { text-align: right; color: var(--muted); white-space: nowrap; padding-right: 10px; }
+.lines td.p { text-align: right; white-space: nowrap; }
+.lines tr.sep td { border-top: 1px dashed var(--line); padding-top: 8px; }
+.lines tr.total td { font-weight: 600; font-size: 14px; }
+.lines .capped { color: var(--warn); font-size: 11px; display: block; }
+.lines tr.dim td { opacity: .45; text-decoration: line-through; }
+.hints { display: grid; gap: 8px; }
+.hint { font-size: 13px; padding: 9px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); }
+.hint.w { background: var(--warn-soft); }
+.override { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 8px; }
+.override .r { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.override input[type="number"] { width: 110px; }
+footer { margin-top: 28px; color: var(--muted); font-size: 12px; max-width: 70ch; display: grid; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+[hidden] { display: none !important; }
+.item-status { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-height: 18px; }
+.item-status .err { color: var(--warn); }
+.item-status a { color: var(--accent); }
+.item-title { font-weight: 700; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.item-title a { color: inherit; text-decoration: none; }
+.item-title a:hover { text-decoration: underline; }
+.spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.credit { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.credit a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <h1><span>ポイント皮算用</span></h1>
+    <p>楽天市場で買う前に、もらえるポイントと実質倍率を計算します。</p>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-cart">
+        <h2 id="h-cart">買うもの <small id="sampleTag"></small></h2>
+        <div class="fld">
+          <label for="bulk">商品URLを1行に1つずつ貼り付け</label>
+          <textarea id="bulk" placeholder="https://item.rakuten.co.jp/ショップ名/商品番号/&#10;https://item.rakuten.co.jp/..."></textarea>
+        </div>
+        <div class="row-actions">
+          <button class="primary" id="addBulk" type="button">URLから追加</button>
+          <button id="addBlank" type="button">手入力で1件追加</button>
+          <button class="ghost" id="clearAll" type="button">カゴを空にする</button>
+          <span id="clearConfirm" hidden>
+            <button id="clearYes" type="button">空にする</button>
+            <button class="ghost" id="clearNo" type="button">やめる</button>
+          </span>
+        </div>
+        <p class="note">URLから商品名・価格・ショップ倍率を自動で取得し、ショップごとに買いまわりの店舗数を数えます。24時間以内に終わるショップ倍率は取得できないので、商品ページと違うときは「ショップ倍率」を直してください（商品ページの「ポイント○倍」の数字をそのまま入れます）。食品など軽減税率の商品は税率を8%に切り替えてください。</p>
+        <div class="row-actions"><button id="refetch" type="button">価格と倍率を取り直す</button><span class="note" id="fetchMsg"></span></div>
+        <div id="items"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-camp">
+        <h2 id="h-camp">買いまわりキャンペーン</h2>
+        <div class="seg" role="radiogroup" aria-label="開催中のキャンペーン">
+          <label><input type="radio" name="mode" value="marathon" id="m-marathon">お買い物マラソン</label>
+          <label><input type="radio" name="mode" value="sale" id="m-sale">スーパーSALE</label>
+          <label><input type="radio" name="mode" value="none" id="m-none">なし</label>
+        </div>
+        <div class="fields-3" id="campFields">
+          <div class="fld"><label for="priorShops">期間中に購入済みの店舗数</label><input type="number" id="priorShops" min="0" max="10" step="1"></div>
+          <div class="fld"><label for="priorEx">購入済み分の合計（税抜・円）</label><input type="number" id="priorEx" min="0" step="1"></div>
+          <div class="fld"><label for="campCap">特典ポイント上限</label><input type="number" id="campCap" min="0" step="100"></div>
+        </div>
+        <p class="note">1店舗1,000円（税込）以上の購入で+1倍、最大10店舗で+9倍。倍率が上がると購入済み分にも上乗せされるので、その増加分もこのカゴの成果として数えます。上限は開催回ごとに5,000〜10,000ptと変わるので特設ページで確認してください。</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-spu">
+        <h2 id="h-spu">SPU <small>2026年7月時点の公式一覧より・要確認</small></h2>
+        <div class="rules-head"><span></span><span>条件</span><span>+倍率</span><span>月上限pt</span></div>
+        <div class="rules" id="spu"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-ext">
+        <h2 id="h-ext">日付・その他のキャンペーン</h2>
+        <div class="rules-head"><span></span><span>キャンペーン</span><span>+倍率</span><span>上限pt</span></div>
+        <div class="rules" id="extras"></div>
+        <div class="row-actions"><button id="addExtra" type="button">キャンペーンを追加</button></div>
+      </section>
+    </div>
+
+    <aside class="summary" aria-label="集計">
+      <div class="receipt" id="receipt"></div>
+      <div class="hints" id="hints"></div>
+      <div class="override">
+        <div class="r">
+          <label class="switch"><input type="checkbox" id="ovOn" aria-label="合計倍率を手入力する"><i></i></label>
+          <label for="ovOn" style="font-weight:700">合計倍率を手入力</label>
+        </div>
+        <div class="r">
+          <input type="number" id="ovVal" min="0" step="0.5" aria-label="合計倍率"> <span>倍（税抜価格に対して）</span>
+        </div>
+        <span class="note">オンにすると上のスイッチを無視して、カゴの税抜合計 × この倍率で計算します。</span>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    <span>ポイントは税抜価格を基準に、楽天カード通常分のみ税込のカード請求額を基準に計算しています。端数はショップごとに切り捨てです。</span>
+    <span>クーポン値引き、送料、ポイント利用分、月内にすでに使った上限枠は反映していません。実際の付与は楽天の判定に従います。キャンペーンの条件は<a href="https://event.rakuten.co.jp/campaign/point-up/everyday/point/" target="_blank" rel="noopener">SPUの公式ページ</a>などで確認してください。</span>
+    <span>このツールは個人が制作・運営しているもので、楽天グループ株式会社とは関係ありません。計算結果によって生じた損害について制作者は責任を負いません。入力内容はお使いのブラウザ内にだけ保存され、外部のサーバーには送信しません（商品情報の取得で楽天ウェブサービスに商品コードを問い合わせる場合を除く）。</span>
+    <span class="credit">
+      <a href="https://www.rakuten.co.jp/" target="_blank" rel="noopener">楽天市場</a>
+      <!-- Rakuten Web Services Attribution Snippet FROM HERE -->
+<a href="https://developers.rakuten.com/" target="_blank">Supported by Rakuten Developers</a>
+<!-- Rakuten Web Services Attribution Snippet TO HERE -->
+    </span>
+  </footer>
+</div>
+
+<script src="config.js"></script>
+
+<script>
+const STORE_KEY = "pointsim-v1";
+const CFG = window.POINTSIM_CONFIG || {};
+const API_URL = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701";
+const HAS_API = !!(CFG.applicationId && CFG.accessKey);
+
+const DEFAULT_SPU = [
+  { key: "base", name: "楽天市場 通常ポイント", note: "全員", bonus: 1, cap: 0, on: true, fixed: true },
+  { key: "card", name: "楽天カード（通常分）", note: "税込の請求額が基準", bonus: 1, cap: 0, on: true, basis: "incl" },
+  { key: "cardsp", name: "楽天カード（特典分）", note: "プレミアムカードは上限5,000pt", bonus: 1, cap: 1000, on: true },
+  { key: "mobile", name: "楽天モバイル", note: "最強プラン契約・要エントリー", bonus: 4, cap: 2000, on: true },
+  { key: "carrier", name: "楽天モバイルキャリア決済", note: "Androidで月2,000円以上・要エントリー", bonus: 2, cap: 1000, on: false },
+  { key: "bank", name: "楽天銀行＋楽天カード", note: "引落+0.3／給与受取で+0.2", bonus: 0.5, cap: 1000, on: false },
+  { key: "fund", name: "楽天証券 投資信託", note: "月3万円以上ポイント投資", bonus: 0.5, cap: 2000, on: false },
+  { key: "us", name: "楽天証券 米国株式", note: "月3万円以上（円貨決済）", bonus: 0.5, cap: 2000, on: false },
+  { key: "wallet", name: "楽天ウォレット", note: "暗号資産 月3万円以上", bonus: 0.5, cap: 1000, on: false },
+  { key: "fami", name: "楽天ポイントカード＋ファミマ", note: "月3,000円以上", bonus: 0.5, cap: 500, on: false },
+  { key: "denki", name: "楽天でんき", note: "前月5,500円以上", bonus: 0.5, cap: 1000, on: false },
+  { key: "travel", name: "楽天トラベル", note: "5,000円以上の予約＆利用", bonus: 1, cap: 1000, on: false },
+  { key: "beauty", name: "楽天ビューティ", note: "3,000円以上の予約＆施術", bonus: 0.5, cap: 500, on: false },
+  { key: "books", name: "楽天ブックス", note: "1注文3,000円以上", bonus: 0.5, cap: 500, on: false },
+  { key: "kobo", name: "楽天Kobo", note: "1注文3,000円以上", bonus: 0.5, cap: 500, on: false },
+  { key: "fashion", name: "Rakuten Fashionアプリ", note: "1注文5,000円以上", bonus: 0.5, cap: 1000, on: false },
+  { key: "pasha", name: "Rakuten Pasha", note: "月500pt以上獲得", bonus: 0.5, cap: 1000, on: false },
+  { key: "kdreams", name: "楽天Kドリームス", note: "月1万円以上の車券投票", bonus: 0.5, cap: 2000, on: false },
+  { key: "rakuma", name: "楽天ラクマ", note: "月2,000円以上の販売", bonus: 0.5, cap: 500, on: false },
+];
+
+const DEFAULT_EXTRAS = [
+  { key: "five", name: "5と0のつく日", note: "楽天カード決済・当日エントリー／上限は月", bonus: 1, cap: 1000, on: true },
+  { key: "win", name: "勝ったら倍", note: "イーグルス・ヴィッセル等の勝利翌日", bonus: 1, cap: 1000, on: false },
+  { key: "wonder", name: "ワンダフルデー", note: "毎月1日・エントリー（開催時のみ）", bonus: 2, cap: 1000, on: false },
+];
+
+const SAMPLE_ITEMS = [
+  { url: "https://item.rakuten.co.jp/sample-kome/koshihikari-10kg/", name: "新米 コシヒカリ 10kg", shop: "sample-kome", price: 5980, qty: 1, tax: 8, shopMul: 2 },
+  { url: "https://item.rakuten.co.jp/sample-zakka/towel-set/", name: "今治タオル フェイスタオル 5枚", shop: "sample-zakka", price: 3300, qty: 1, tax: 10, shopMul: 1 },
+  { url: "https://item.rakuten.co.jp/sample-zakka/hanger-20p/", name: "すべらないハンガー 20本", shop: "sample-zakka", price: 1580, qty: 1, tax: 10, shopMul: 1 },
+  { url: "https://item.rakuten.co.jp/sample-drink/water-2l-12/", name: "天然水 2L×12本", shop: "sample-drink", price: 1680, qty: 2, tax: 8, shopMul: 5 },
+  { url: "https://item.rakuten.co.jp/sample-coffee/drip-bag/", name: "ドリップバッグ 30袋", shop: "sample-coffee", price: 980, qty: 1, tax: 8, shopMul: 1 },
+];
+
+let uid = 1;
+const newId = () => "i" + (uid++) + Date.now().toString(36);
+
+function defaultState() {
+  return {
+    sample: true,
+    items: SAMPLE_ITEMS.map(x => ({ id: newId(), ...x })),
+    mode: "marathon", priorShops: 0, priorEx: 0, campCap: 7000,
+    spu: DEFAULT_SPU.map(x => ({ ...x })),
+    extras: DEFAULT_EXTRAS.map(x => ({ ...x })),
+    ovOn: false, ovVal: 10,
+  };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return defaultState();
+    const s = JSON.parse(raw);
+    const d = defaultState();
+    // 新しく増えたSPU項目を取りこぼさないよう既定値とマージ
+    const savedSpu = Object.fromEntries((s.spu || []).map(r => [r.key, r]));
+    s.spu = d.spu.map(r => savedSpu[r.key] ? { ...r, on: savedSpu[r.key].on, bonus: savedSpu[r.key].bonus, cap: savedSpu[r.key].cap } : r);
+    s.extras = s.extras || d.extras;
+    s.items = (s.items || []).map(it => ({ ...it, id: newId(), status: it.status === "loading" ? "" : it.status }));
+    return { ...d, ...s };
+  } catch (e) { return defaultState(); }
+}
+let state = loadState();
+function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
+
+/* ---------- URL解析 ---------- */
+function parseUrl(u) {
+  u = (u || "").trim();
+  if (!u) return null;
+  let url;
+  try { url = new URL(u); } catch (e) { return { url: u, shop: "", code: "" }; }
+  const host = url.hostname;
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (/(^|\.)item\.rakuten\.co\.jp$/.test(host) && parts.length >= 1) return { url: u, shop: parts[0], code: parts[1] || "", ichiba: true };
+  if (/books\.rakuten\.co\.jp$/.test(host)) return { url: u, shop: "楽天ブックス", code: parts.join("/") };
+  if (/24\.rakuten\.co\.jp$/.test(host)) return { url: u, shop: "Rakuten24", code: parts.join("/") };
+  if (/fashion\.rakuten\.co\.jp$/.test(host)) return { url: u, shop: "Rakuten Fashion", code: parts.join("/") };
+  return { url: u, shop: "", code: parts.join("/") };
+}
+
+/* ---------- 計算（純関数） ---------- */
+const exOf = it => Math.floor((+it.price || 0) * (+it.qty || 0) * 100 / (100 + (+it.tax || 10)));
+const inclOf = it => (+it.price || 0) * (+it.qty || 0);
+
+function calc(s) {
+  const shops = new Map();
+  s.items.forEach((it, idx) => {
+    const key = (it.shop || "").trim() || "（ショップ未入力 " + (idx + 1) + "）";
+    if (!shops.has(key)) shops.set(key, { name: key, incl: 0, ex: 0, shopPts: 0, items: [] });
+    const g = shops.get(key);
+    const ex = exOf(it), incl = inclOf(it);
+    g.incl += incl; g.ex += ex; g.items.push(it);
+    const mul = Math.max(1, +it.shopMul || 1);
+    g.shopPts += Math.floor(ex * (mul - 1) / 100);
+  });
+  const groups = [...shops.values()];
+  const cartIncl = groups.reduce((a, g) => a + g.incl, 0);
+  const cartEx = groups.reduce((a, g) => a + g.ex, 0);
+  const lines = [];
+
+  const ruleLine = (r) => {
+    const raw = groups.reduce((a, g) => a + Math.floor((r.basis === "incl" ? g.incl : g.ex) * (+r.bonus || 0) / 100), 0);
+    const cap = +r.cap || 0;
+    const pts = cap > 0 ? Math.min(raw, cap) : raw;
+    return { label: r.name, mult: +r.bonus || 0, pts, capped: cap > 0 && raw > cap, raw };
+  };
+  s.spu.filter(r => r.on).forEach(r => lines.push({ ...ruleLine(r), group: "SPU" }));
+
+  const shopPts = groups.reduce((a, g) => a + g.shopPts, 0);
+  if (shopPts > 0) lines.push({ label: "ショップ独自倍率", mult: null, pts: shopPts, group: "shop" });
+
+  let camp = null;
+  if (s.mode !== "none") {
+    const qualifying = groups.filter(g => g.incl >= 1000).length;
+    const prior = Math.max(0, Math.min(10, Math.floor(+s.priorShops || 0)));
+    const n = Math.min(10, prior + qualifying);
+    const priorEx = Math.max(0, +s.priorEx || 0);
+    const cap = +s.campCap || 0;
+    const lim = v => cap > 0 ? Math.min(v, cap) : v;
+    const rawAll = Math.floor((priorEx + cartEx) * Math.max(0, n - 1) / 100);
+    const before = lim(Math.floor(priorEx * Math.max(0, prior - 1) / 100));
+    const after = lim(rawAll);
+    camp = { qualifying, prior, n, pts: after - before, capped: cap > 0 && rawAll > cap, cap, priorEx };
+    lines.push({ label: (s.mode === "sale" ? "スーパーSALE" : "お買い物マラソン") + `（${n}店舗）`, mult: Math.max(0, n - 1), pts: camp.pts, capped: camp.capped, group: "camp" });
+  }
+  s.extras.filter(r => r.on).forEach(r => lines.push({ ...ruleLine(r), group: "extra" }));
+
+  const computed = lines.reduce((a, l) => a + l.pts, 0);
+  const override = s.ovOn ? Math.floor(cartEx * (+s.ovVal || 0) / 100) : null;
+  const total = override ?? computed;
+  return {
+    groups, cartIncl, cartEx, lines, camp, computed, override, total,
+    rate: cartIncl ? total / cartIncl * 100 : 0,
+    mult: cartEx ? total / cartEx * 100 : 0,
+    net: cartIncl - total,
+  };
+}
+
+/* ---------- 描画 ---------- */
+const $ = id => document.getElementById(id);
+const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
+const num = n => Math.round(n).toLocaleString("ja-JP");
+const fmtMul = m => (Math.round(m * 10) / 10).toString();
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function renderItems() {
+  $("sampleTag").innerHTML = state.sample && state.items.length ? '<span class="tag">サンプル</span> 例として入れてあります。「カゴを空にする」で消せます' : "";
+  const box = $("items");
+  if (!state.items.length) {
+    box.innerHTML = '<div class="empty">まだ何もありません。上の欄に商品URLを貼って「URLから追加」を押してください。</div>';
+    return;
+  }
+  // ショップごとにまとめて表示（入力順を保つ）
+  const order = []; const map = new Map();
+  state.items.forEach((it, idx) => {
+    const k = (it.shop || "").trim() || "\u0000" + idx;
+    if (!map.has(k)) { map.set(k, []); order.push(k); }
+    map.get(k).push(it);
+  });
+  box.style.display = "grid"; box.style.gap = "12px";
+  box.innerHTML = order.map(k => {
+    const its = map.get(k);
+    const named = its.find(it => it.shopName);
+    const label = k.startsWith("\u0000") ? "ショップ未入力" : named ? named.shopName : k;
+    return `<div class="shop" data-shop="${esc(k)}">
+      <div class="shop-head"><span>🛒&#xFE0E; ${esc(label)}</span><span class="shop-stat"></span></div>
+      ${its.map(it => itemHtml(it)).join("")}
+    </div>`;
+  }).join("");
+  updateShopHeads();
+}
+
+function itemHtml(it) {
+  const p = it.url ? parseUrl(it.url) : null;
+  const safeHref = it.url && /^https?:\/\//.test(it.url) ? esc(it.url) : "";
+  const link = it.itemUrl && /^https:\/\//.test(it.itemUrl) ? esc(it.itemUrl) : safeHref;
+  return `<div class="item" data-id="${it.id}">
+    ${it.title ? `<div class="item-title">${link ? `<a href="${link}" target="_blank" rel="noopener">${esc(it.title)}</a>` : esc(it.title)}</div>` : ""}
+    <div class="item-status">${statusHtml(it)}</div>
+    <div class="item-url">
+      <div class="fld"><label for="u-${it.id}">商品URL</label><input type="url" id="u-${it.id}" data-k="url" value="${esc(it.url)}" placeholder="https://item.rakuten.co.jp/..."></div>
+      ${safeHref ? `<a href="${safeHref}" target="_blank" rel="noopener">ページを開く ↗</a>` : "<span></span>"}
+    </div>
+    <div class="item-fields">
+      <div class="f-name"><label for="n-${it.id}">商品名（メモ）</label><input type="text" id="n-${it.id}" data-k="name" value="${esc(it.name)}" placeholder="${esc(p && p.code ? p.code : "")}"></div>
+      <div class="f-shop"><label for="s-${it.id}">ショップ</label><input type="text" id="s-${it.id}" data-k="shop" value="${esc(it.shop)}" placeholder="URLから自動"></div>
+      <div class="f-price"><label for="p-${it.id}">価格（税込）</label><input type="number" id="p-${it.id}" data-k="price" min="0" step="1" value="${esc(it.price)}"></div>
+      <div class="f-qty"><label for="q-${it.id}">個数</label><input type="number" id="q-${it.id}" data-k="qty" min="1" step="1" value="${esc(it.qty)}"></div>
+      <div class="f-tax"><label for="t-${it.id}">税率</label><select id="t-${it.id}" data-k="tax"><option value="10"${+it.tax === 10 ? " selected" : ""}>10%</option><option value="8"${+it.tax === 8 ? " selected" : ""}>8%</option></select></div>
+      <div class="f-mul"><label for="x-${it.id}">ショップ倍率</label><input type="number" id="x-${it.id}" data-k="shopMul" min="1" step="1" value="${esc(it.shopMul)}"></div>
+      <div class="f-del"><button type="button" class="ghost del" data-del="${it.id}" aria-label="この商品を削除">✕</button></div>
+    </div>
+  </div>`;
+}
+
+function updateShopHeads() {
+  const r = calc(state);
+  const byName = new Map(r.groups.map(g => [g.name, g]));
+  document.querySelectorAll(".shop").forEach(el => {
+    const k = el.dataset.shop;
+    const firstItem = state.items.find(it => it.id === el.querySelector(".item")?.dataset.id);
+    const idx = state.items.indexOf(firstItem);
+    const key = k.startsWith("\u0000") ? "（ショップ未入力 " + (idx + 1) + "）" : k;
+    const g = byName.get(key);
+    if (!g) return;
+    const ok = g.incl >= 1000;
+    el.querySelector(".shop-stat").innerHTML = `<b>${yen(g.incl)}</b> ` +
+      (state.mode === "none" ? "" : ok ? '<span class="chip ok">買いまわり対象</span>' : `<span class="chip ng">あと${yen(1000 - g.incl)}で対象</span>`);
+  });
+}
+
+function ruleHtml(r, list, i) {
+  const id = `${list}-${i}`;
+  const nameCell = r.custom
+    ? `<input type="text" id="${id}-name" data-list="${list}" data-i="${i}" data-k="name" value="${esc(r.name)}" aria-label="キャンペーン名">`
+    : `${esc(r.name)}<small>${esc(r.note || "")}</small>`;
+  return `<div class="rule${r.on ? "" : " off"}">
+    <label class="switch"><input type="checkbox" id="${id}-on" data-list="${list}" data-i="${i}" data-k="on"${r.on ? " checked" : ""}${r.fixed ? " disabled" : ""} aria-label="${esc(r.name)}"><i></i></label>
+    <div class="nm">${nameCell}${r.custom ? `<small><button type="button" class="ghost" style="padding:0 4px;font-size:11px" data-rm="${i}">削除</button></small>` : ""}</div>
+    <div class="num"><input type="number" id="${id}-bonus" data-list="${list}" data-i="${i}" data-k="bonus" step="0.1" min="0" value="${esc(r.bonus)}" aria-label="${esc(r.name)}の上乗せ倍率"></div>
+    <div class="num"><input type="number" id="${id}-cap" data-list="${list}" data-i="${i}" data-k="cap" step="100" min="0" value="${r.cap || ""}" placeholder="なし" aria-label="${esc(r.name)}の上限"${r.fixed ? " disabled" : ""}></div>
+  </div>`;
+}
+function renderRules() {
+  $("spu").innerHTML = state.spu.map((r, i) => ruleHtml(r, "spu", i)).join("");
+  $("extras").innerHTML = state.extras.map((r, i) => ruleHtml(r, "extras", i)).join("");
+}
+
+function renderCamp() {
+  $("m-" + state.mode).checked = true;
+  $("priorShops").value = state.priorShops;
+  $("priorEx").value = state.priorEx;
+  $("campCap").value = state.campCap;
+  $("campFields").hidden = state.mode === "none";
+  $("ovOn").checked = state.ovOn;
+  $("ovVal").value = state.ovVal;
+}
+
+function renderSummary() {
+  const r = calc(state);
+  const ov = r.override !== null;
+  const rows = r.lines.map(l => `<tr class="${ov ? "dim" : ""}"><td>${esc(l.label)}${l.capped ? '<span class="capped">上限に到達</span>' : ""}</td><td class="m">${l.mult === null ? "" : "+" + fmtMul(l.mult) + "倍"}</td><td class="p">${num(l.pts)}</td></tr>`).join("");
+  $("receipt").innerHTML = `
+    <div class="kicker">獲得予定ポイント</div>
+    <div class="big"><b>${num(r.total)}</b><span>pt</span></div>
+    <div class="kicker">${state.items.length}商品・${r.groups.length}ショップ／お支払い ${yen(r.cartIncl)}</div>
+    <div class="kpis">
+      <div><small>実質倍率（税抜比）</small><b>${fmtMul(r.mult)}倍</b></div>
+      <div><small>還元率（税込比）</small><b>${(Math.round(r.rate * 10) / 10).toFixed(1)}%</b></div>
+      <div><small>ポイント差引後</small><b>${yen(r.net)}</b></div>
+      <div><small>税抜合計</small><b>${yen(r.cartEx)}</b></div>
+    </div>
+    <table class="lines">
+      ${rows}
+      ${ov ? `<tr class="sep"><td>手入力の倍率</td><td class="m">${fmtMul(+state.ovVal || 0)}倍</td><td class="p">${num(r.override)}</td></tr>` : ""}
+      <tr class="sep total"><td>合計</td><td class="m"></td><td class="p">${num(r.total)} pt</td></tr>
+    </table>`;
+  renderHints(r);
+  updateShopHeads();
+}
+
+function renderHints(r) {
+  const h = [];
+  if (r.camp) {
+    const short = r.groups.filter(g => g.incl > 0 && g.incl < 1000);
+    short.forEach(g => h.push(["w", `${g.name} はあと${yen(1000 - g.incl)}で買いまわり1店舗に数えられます。`]));
+    if (r.camp.n < 10) h.push(["", `あと${10 - r.camp.n}店舗（各1,000円以上）で買いまわり最大の+9倍です。次の1店舗で+1倍上がると、およそ${num(Math.floor((r.camp.priorEx + r.cartEx) / 100))}pt増えます。`]);
+    else h.push(["", "買いまわりは10店舗に到達しています。"]);
+    if (r.camp.capped) h.push(["w", `買いまわり特典が上限${num(r.camp.cap)}ptに達しています。ここから先の買い物には買いまわり分が付きません。`]);
+    else if (r.camp.n > 1 && r.camp.cap > 0) {
+      const room = Math.ceil(r.camp.cap * 100 / (r.camp.n - 1)) - (r.camp.priorEx + r.cartEx);
+      if (room > 0) h.push(["", `今の倍率なら、買いまわり上限まであと税抜${yen(room)}分買えます。`]);
+    }
+  }
+  r.lines.filter(l => l.capped && l.group !== "camp").forEach(l => h.push(["w", `${l.label} が上限に達しています（計算上 ${num(l.raw)}pt → ${num(l.pts)}pt）。`]));
+  $("hints").innerHTML = h.map(([c, t]) => `<div class="hint ${c}">${esc(t)}</div>`).join("");
+}
+
+function refresh() { save(); renderSummary(); }
+
+/* ---------- 楽天ウェブサービス 商品検索API ---------- */
+function statusHtml(it) {
+  if (it.status === "loading") return '<span class="spin" aria-hidden="true"></span><span>商品情報を取得中…</span>';
+  if (it.status === "err") return `<span class="err">${esc(it.errMsg)}</span>`;
+  if (it.status !== "ok") return "";
+  const bits = [];
+  bits.push(it.availability === 0 ? '<span class="err">在庫切れ</span>' : "在庫あり");
+  bits.push(it.postageFlag === 1 ? "送料別" : "送料込み");
+  if ((+it.apiRate || 1) > 1 && it.ptEnd) bits.push(`ポイント${esc(it.apiRate)}倍は ${esc(String(it.ptEnd).slice(0, 16))} まで`);
+  if (it.fetchedAt) bits.push(`${esc(it.fetchedAt)} 取得`);
+  return bits.map(b => `<span>${b}</span>`).join("");
+}
+
+// ブラウザの fetch は Origin ヘッダーを付けるので「許可されたWebサイト」の判定が通る（JSONPでは通らない）
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let lastCall = 0;
+async function callApi(params, retry = 1) {
+  const wait = lastCall + 1100 - Date.now(); // アプリ全体で毎秒1リクエストまで
+  if (wait > 0) await sleep(wait);
+  lastCall = Date.now();
+  const q = new URLSearchParams({ ...params, applicationId: CFG.applicationId, accessKey: CFG.accessKey, format: "json", formatVersion: "2" });
+  const res = await fetch(API_URL + "?" + q);
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (res.status === 429 || (data && data.statusCode === 429)) {
+    if (retry > 0) { await sleep(1500); return callApi(params, retry - 1); }
+    const e = new Error("rate"); e.code = "too_many_requests"; throw e;
+  }
+  if (!data) { const e = new Error("bad response"); e.code = "http_" + res.status; throw e; }
+  // エラーは {error, error_description} と {errors: {errorCode, errorMessage}} の2形式がある
+  if (data.error || data.errors) {
+    const e = new Error(data.error_description || data.errors?.errorMessage || data.error);
+    e.code = data.error || data.errors?.errorMessage || "error";
+    throw e;
+  }
+  return data;
+}
+
+const queue = [];
+let running = false;
+function enqueue(it) {
+  if (!HAS_API || !it.url) return;
+  const p = parseUrl(it.url);
+  if (!p || !p.ichiba || !p.code) {
+    it.status = "err"; it.errMsg = "自動取得できるのは楽天市場の商品ページ（item.rakuten.co.jp/ショップ/商品/）のURLだけです。";
+    return;
+  }
+  if (p.shop.startsWith("sample-")) return;
+  it.status = "loading";
+  if (!queue.includes(it.id)) queue.push(it.id);
+  if (!running) runQueue();
+}
+async function runQueue() {
+  running = true;
+  while (queue.length) {
+    const it = state.items.find(x => x.id === queue.shift());
+    if (!it) continue;
+    try { applyItem(it, await lookup(parseUrl(it.url))); }
+    catch (e) {
+      it.status = "err";
+      it.errMsg = e.code === "too_many_requests" ? "アクセスが集中しています。少し待って「価格と倍率を取り直す」を押してください。"
+        : e.notFound ? "このURLから商品を特定できませんでした（販売終了や、APIで検索できない商品番号のことがあります）。価格とショップ倍率を手で入力してください。"
+        : /REFERRER|NOT_ALLOWED/.test(e.code || "") ? "このページのドメインは楽天ウェブサービスに許可されていないため、自動取得できません。"
+        : "商品情報を取得できませんでした。価格とショップ倍率を手で入力してください。";
+    }
+    renderItems(); refresh();
+  }
+  running = false;
+  $("fetchMsg").textContent = "";
+}
+async function lookup(p) {
+  // APIの itemCode は「ショップ:数字の商品ID」で、URLの商品管理番号とは別物。どちらも itemUrl で照合する
+  const want = `/${p.shop}/${p.code}/`;
+  const match = list => (list || []).find(x => (x.itemUrl || "").split("?")[0].includes(want));
+  const soft = e => ["not_found", "wrong_parameter"].includes(e.code);
+  if (/^\d+$/.test(p.code)) {
+    try { const hit = match((await callApi({ itemCode: `${p.shop}:${p.code}` })).Items); if (hit) return hit; }
+    catch (e) { if (!soft(e)) throw e; }
+  }
+  try { const hit = match((await callApi({ shopCode: p.shop, keyword: p.code, hits: 30 })).Items); if (hit) return hit; }
+  catch (e) { if (!soft(e)) throw e; }
+  const e = new Error("not found"); e.notFound = true; throw e;
+}
+function applyItem(it, x) {
+  it.title = x.itemName || "";
+  if (!it.name) it.name = "";
+  it.itemUrl = x.itemUrl || "";
+  it.shop = x.shopCode || it.shop;
+  it.shopName = x.shopName || "";
+  const base = +x.itemPrice || 0;
+  it.price = x.taxFlag === 1 ? Math.round(base * (100 + (+it.tax || 10)) / 100) : base;
+  it.apiRate = +x.pointRate || 1;
+  it.shopMul = it.apiRate;
+  it.ptEnd = x.pointRateEndTime || "";
+  it.availability = x.availability;
+  it.postageFlag = x.postageFlag;
+  const d = new Date();
+  it.fetchedAt = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  it.status = "ok"; it.errMsg = "";
+}
+
+/* ---------- イベント ---------- */
+$("items").addEventListener("input", e => {
+  const el = e.target, row = el.closest(".item"); if (!row || !el.dataset.k) return;
+  const it = state.items.find(x => x.id === row.dataset.id); if (!it) return;
+  const k = el.dataset.k;
+  it[k] = el.type === "number" ? el.value : el.value;
+  state.sample = false;
+  if (k === "url") {
+    const p = parseUrl(el.value);
+    if (p && p.shop && (!it.shop || it._autoShop)) { it.shop = p.shop; it._autoShop = true; row.querySelector('[data-k="shop"]').value = p.shop; }
+  }
+  if (k === "shop") it._autoShop = false;
+  refresh();
+});
+$("items").addEventListener("change", e => {
+  // ショップ名が変わったらグループ表示を組み直す
+  const k = e.target.dataset.k;
+  if (k === "url") {
+    const it = state.items.find(x => x.id === e.target.closest(".item")?.dataset.id);
+    if (it) { it.title = ""; it.shopName = ""; it.status = ""; enqueue(it); }
+  }
+  if (k === "shop" || k === "url") { renderItems(); refresh(); }
+});
+$("refetch").addEventListener("click", () => {
+  if (!HAS_API) { $("fetchMsg").textContent = "APIキーが設定されていないため、自動取得は使えません。"; return; }
+  const targets = state.items.filter(it => it.url);
+  if (!targets.length) { $("fetchMsg").textContent = "URLが入っている商品がありません。"; return; }
+  targets.forEach(enqueue);
+  $("fetchMsg").textContent = `${targets.length}件を取り直しています…`;
+  renderItems(); refresh();
+});
+$("items").addEventListener("click", e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  state.items = state.items.filter(x => x.id !== b.dataset.del);
+  renderItems(); refresh();
+});
+$("addBulk").addEventListener("click", () => {
+  const lines = $("bulk").value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  if (!lines.length) { $("bulk").focus(); return; }
+  if (state.sample) { state.items = []; state.sample = false; }
+  lines.forEach(u => {
+    const p = parseUrl(u);
+    const it = { id: newId(), url: p.url, name: "", shop: p.shop, _autoShop: true, price: "", qty: 1, tax: 10, shopMul: 1 };
+    state.items.push(it);
+    enqueue(it);
+  });
+  $("bulk").value = "";
+  renderItems(); refresh();
+  if (HAS_API) return;
+  const firstEmpty = state.items.find(it => it.price === "");
+  if (firstEmpty) document.getElementById("p-" + firstEmpty.id)?.focus();
+});
+$("addBlank").addEventListener("click", () => {
+  if (state.sample) { state.items = []; state.sample = false; }
+  const it = { id: newId(), url: "", name: "", shop: "", price: "", qty: 1, tax: 10, shopMul: 1 };
+  state.items.push(it);
+  renderItems(); refresh();
+  document.getElementById("u-" + it.id)?.focus();
+});
+$("clearAll").addEventListener("click", () => { $("clearConfirm").hidden = false; $("clearYes").focus(); });
+$("clearNo").addEventListener("click", () => { $("clearConfirm").hidden = true; });
+$("clearYes").addEventListener("click", () => {
+  state.items = []; state.sample = false; $("clearConfirm").hidden = true; renderItems(); refresh();
+});
+
+function onRule(e) {
+  const el = e.target; const list = el.dataset.list; if (!list) return;
+  const r = state[list][+el.dataset.i]; const k = el.dataset.k;
+  if (k === "on") { r.on = el.checked; el.closest(".rule").classList.toggle("off", !el.checked); }
+  else if (k === "name") r.name = el.value;
+  else r[k] = el.value === "" ? 0 : +el.value;
+  refresh();
+}
+$("spu").addEventListener("input", onRule);
+$("extras").addEventListener("input", onRule);
+$("extras").addEventListener("click", e => {
+  const b = e.target.closest("[data-rm]"); if (!b) return;
+  state.extras.splice(+b.dataset.rm, 1); renderRules(); refresh();
+});
+$("addExtra").addEventListener("click", () => {
+  state.extras.push({ key: "c" + Date.now(), name: "", bonus: 1, cap: 0, on: true, custom: true });
+  renderRules(); refresh();
+  document.getElementById(`extras-${state.extras.length - 1}-name`)?.focus();
+});
+
+document.querySelectorAll('input[name="mode"]').forEach(el => el.addEventListener("change", () => {
+  state.mode = el.value; $("campFields").hidden = state.mode === "none"; refresh();
+}));
+["priorShops", "priorEx", "campCap"].forEach(id => $(id).addEventListener("input", e => { state[id] = e.target.value === "" ? 0 : +e.target.value; refresh(); }));
+$("ovOn").addEventListener("change", e => { state.ovOn = e.target.checked; refresh(); });
+$("ovVal").addEventListener("input", e => { state.ovVal = e.target.value; refresh(); });
+
+renderItems(); renderRules(); renderCamp(); renderSummary();
+if (!HAS_API) $("fetchMsg").textContent = "APIキーが未設定のため、価格とショップ倍率は手入力です。";
+</script>
+</body>
+</html>
