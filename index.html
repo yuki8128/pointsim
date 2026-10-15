@@ -608,7 +608,8 @@ function enqueue(it) {
 async function runQueue() {
   running = true;
   while (queue.length) {
-    const it = state.items.find(x => x.id === queue.shift());
+    const id = queue.shift();
+    const it = state.items.find(x => x.id === id);
     if (!it) continue;
     try { applyItem(it, await lookup(parseUrl(it.url))); }
     catch (e) {
