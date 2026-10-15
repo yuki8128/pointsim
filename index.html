@@ -200,7 +200,7 @@ body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: en
             <button class="ghost" id="clearNo" type="button">やめる</button>
           </span>
         </div>
-        <p class="note">URLから商品名・価格・ショップ倍率を自動で取得し、ショップごとに買いまわりの店舗数を数えます。24時間以内に終わるショップ倍率は取得できないので、商品ページと違うときは「ショップ倍率」を直してください（商品ページの「ポイント○倍」の数字をそのまま入れます）。食品など軽減税率の商品は税率を8%に切り替えてください。</p>
+        <p class="note">URLから商品名・価格・ショップ倍率を自動で取得し、ショップごとに買いまわりの店舗数を数えます。「ショップUP」は商品ページの「○倍UP」（内訳の「アイテムポイントアップ分」）の数字です。ポイントアップがない商品は0です。24時間以内に終わるポイントアップは自動取得できないので、商品ページと違うときは手で直してください。食品など軽減税率の商品は税率を8%に切り替えてください。</p>
         <div class="row-actions"><button id="refetch" type="button">価格と倍率を取り直す</button><span class="note" id="fetchMsg"></span></div>
         <div id="items"></div>
       </section>
@@ -221,7 +221,7 @@ body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: en
       </section>
 
       <section class="panel" aria-labelledby="h-spu">
-        <h2 id="h-spu">SPU <small>2026年7月時点の公式一覧より・要確認</small></h2>
+        <h2 id="h-spu">SPU <small>2026年10月時点・要確認</small></h2>
         <div class="rules-head"><span></span><span>条件</span><span>+倍率</span><span>月上限pt</span></div>
         <div class="rules" id="spu"></div>
       </section>
@@ -267,6 +267,7 @@ body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: en
 
 <script>
 const STORE_KEY = "pointsim-v1";
+// v1 は合計倍率 shopMul を保存していたので、読み込み時に +倍の shopUp に変換する
 const CFG = window.POINTSIM_CONFIG || {};
 const API_URL = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701";
 const HAS_API = !!(CFG.applicationId && CFG.accessKey);
@@ -277,6 +278,7 @@ const DEFAULT_SPU = [
   { key: "cardsp", name: "楽天カード（特典分）", note: "プレミアムカードは上限5,000pt", bonus: 1, cap: 1000, on: true },
   { key: "mobile", name: "楽天モバイル", note: "最強プラン契約・要エントリー", bonus: 4, cap: 2000, on: true },
   { key: "carrier", name: "楽天モバイルキャリア決済", note: "Androidで月2,000円以上・要エントリー", bonus: 2, cap: 1000, on: false },
+  { key: "hikari", name: "Rakuten Turbo／楽天ひかり", note: "要エントリー・上限は公式で確認", bonus: 2, cap: 0, on: false },
   { key: "bank", name: "楽天銀行＋楽天カード", note: "引落+0.3／給与受取で+0.2", bonus: 0.5, cap: 1000, on: false },
   { key: "fund", name: "楽天証券 投資信託", note: "月3万円以上ポイント投資", bonus: 0.5, cap: 2000, on: false },
   { key: "us", name: "楽天証券 米国株式", note: "月3万円以上（円貨決済）", bonus: 0.5, cap: 2000, on: false },
@@ -295,16 +297,17 @@ const DEFAULT_SPU = [
 
 const DEFAULT_EXTRAS = [
   { key: "five", name: "5と0のつく日", note: "楽天カード決済・当日エントリー／上限は月", bonus: 1, cap: 1000, on: true },
+  { key: "rakuma", name: "買いまわり（ラクマ特典）", note: "マラソン中・ラクマ利用でエントリー", bonus: 1, cap: 1500, on: false },
   { key: "win", name: "勝ったら倍", note: "イーグルス・ヴィッセル等の勝利翌日", bonus: 1, cap: 1000, on: false },
   { key: "wonder", name: "ワンダフルデー", note: "毎月1日・エントリー（開催時のみ）", bonus: 2, cap: 1000, on: false },
 ];
 
 const SAMPLE_ITEMS = [
-  { url: "https://item.rakuten.co.jp/sample-kome/koshihikari-10kg/", name: "新米 コシヒカリ 10kg", shop: "sample-kome", price: 5980, qty: 1, tax: 8, shopMul: 2 },
-  { url: "https://item.rakuten.co.jp/sample-zakka/towel-set/", name: "今治タオル フェイスタオル 5枚", shop: "sample-zakka", price: 3300, qty: 1, tax: 10, shopMul: 1 },
-  { url: "https://item.rakuten.co.jp/sample-zakka/hanger-20p/", name: "すべらないハンガー 20本", shop: "sample-zakka", price: 1580, qty: 1, tax: 10, shopMul: 1 },
-  { url: "https://item.rakuten.co.jp/sample-drink/water-2l-12/", name: "天然水 2L×12本", shop: "sample-drink", price: 1680, qty: 2, tax: 8, shopMul: 5 },
-  { url: "https://item.rakuten.co.jp/sample-coffee/drip-bag/", name: "ドリップバッグ 30袋", shop: "sample-coffee", price: 980, qty: 1, tax: 8, shopMul: 1 },
+  { url: "https://item.rakuten.co.jp/sample-kome/koshihikari-10kg/", name: "新米 コシヒカリ 10kg", shop: "sample-kome", price: 5980, qty: 1, tax: 8, shopUp: 1 },
+  { url: "https://item.rakuten.co.jp/sample-zakka/towel-set/", name: "今治タオル フェイスタオル 5枚", shop: "sample-zakka", price: 3300, qty: 1, tax: 10, shopUp: 0 },
+  { url: "https://item.rakuten.co.jp/sample-zakka/hanger-20p/", name: "すべらないハンガー 20本", shop: "sample-zakka", price: 1580, qty: 1, tax: 10, shopUp: 0 },
+  { url: "https://item.rakuten.co.jp/sample-drink/water-2l-12/", name: "天然水 2L×12本", shop: "sample-drink", price: 1680, qty: 2, tax: 8, shopUp: 4 },
+  { url: "https://item.rakuten.co.jp/sample-coffee/drip-bag/", name: "ドリップバッグ 30袋", shop: "sample-coffee", price: 980, qty: 1, tax: 8, shopUp: 0 },
 ];
 
 let uid = 1;
@@ -331,7 +334,8 @@ function loadState() {
     const savedSpu = Object.fromEntries((s.spu || []).map(r => [r.key, r]));
     s.spu = d.spu.map(r => savedSpu[r.key] ? { ...r, on: savedSpu[r.key].on, bonus: savedSpu[r.key].bonus, cap: savedSpu[r.key].cap } : r);
     s.extras = s.extras || d.extras;
-    s.items = (s.items || []).map(it => ({ ...it, id: newId(), status: it.status === "loading" ? "" : it.status }));
+    d.extras.forEach(r => { if (!s.extras.some(x => x.key === r.key)) s.extras.push(r); });
+    s.items = (s.items || []).map(it => ({ ...it, id: newId(), status: it.status === "loading" ? "" : it.status, shopUp: it.shopUp ?? Math.max(0, (+it.shopMul || 1) - 1) }));
     return { ...d, ...s };
   } catch (e) { return defaultState(); }
 }
@@ -365,8 +369,8 @@ function calc(s) {
     const g = shops.get(key);
     const ex = exOf(it), incl = inclOf(it);
     g.incl += incl; g.ex += ex; g.items.push(it);
-    const mul = Math.max(1, +it.shopMul || 1);
-    g.shopPts += Math.floor(ex * (mul - 1) / 100);
+    const up = Math.max(0, +it.shopUp || 0);
+    g.shopPts += Math.floor(ex * up / 100);
   });
   const groups = [...shops.values()];
   const cartIncl = groups.reduce((a, g) => a + g.incl, 0);
@@ -462,7 +466,7 @@ function itemHtml(it) {
       <div class="f-price"><label for="p-${it.id}">価格（税込）</label><input type="number" id="p-${it.id}" data-k="price" min="0" step="1" value="${esc(it.price)}"></div>
       <div class="f-qty"><label for="q-${it.id}">個数</label><input type="number" id="q-${it.id}" data-k="qty" min="1" step="1" value="${esc(it.qty)}"></div>
       <div class="f-tax"><label for="t-${it.id}">税率</label><select id="t-${it.id}" data-k="tax"><option value="10"${+it.tax === 10 ? " selected" : ""}>10%</option><option value="8"${+it.tax === 8 ? " selected" : ""}>8%</option></select></div>
-      <div class="f-mul"><label for="x-${it.id}">ショップ倍率</label><input type="number" id="x-${it.id}" data-k="shopMul" min="1" step="1" value="${esc(it.shopMul)}"></div>
+      <div class="f-mul"><label for="x-${it.id}">ショップUP（+倍）</label><input type="number" id="x-${it.id}" data-k="shopUp" min="0" step="1" value="${esc(it.shopUp)}"></div>
       <div class="f-del"><button type="button" class="ghost del" data-del="${it.id}" aria-label="この商品を削除">✕</button></div>
     </div>
   </div>`;
@@ -561,7 +565,7 @@ function statusHtml(it) {
   const bits = [];
   bits.push(it.availability === 0 ? '<span class="err">在庫切れ</span>' : "在庫あり");
   bits.push(it.postageFlag === 1 ? "送料別" : "送料込み");
-  if ((+it.apiRate || 1) > 1 && it.ptEnd) bits.push(`ポイント${esc(it.apiRate)}倍は ${esc(String(it.ptEnd).slice(0, 16))} まで`);
+  if ((+it.apiRate || 1) > 1) bits.push(`${esc(it.apiRate - 1)}倍UP` + (it.ptEnd && !String(it.ptEnd).startsWith("9999") ? `（${esc(String(it.ptEnd).slice(0, 16))} まで）` : ""));
   if (it.fetchedAt) bits.push(`${esc(it.fetchedAt)} 取得`);
   return bits.map(b => `<span>${b}</span>`).join("");
 }
@@ -615,9 +619,9 @@ async function runQueue() {
     catch (e) {
       it.status = "err";
       it.errMsg = e.code === "too_many_requests" ? "アクセスが集中しています。少し待って「価格と倍率を取り直す」を押してください。"
-        : e.notFound ? "このURLから商品を特定できませんでした（販売終了や、APIで検索できない商品番号のことがあります）。価格とショップ倍率を手で入力してください。"
+        : e.notFound ? "このURLから商品を特定できませんでした（販売終了や、APIで検索できない商品番号のことがあります）。価格とショップUPを手で入力してください。"
         : /REFERRER|NOT_ALLOWED/.test(e.code || "") ? "このページのドメインは楽天ウェブサービスに許可されていないため、自動取得できません。"
-        : "商品情報を取得できませんでした。価格とショップ倍率を手で入力してください。";
+        : "商品情報を取得できませんでした。価格とショップUPを手で入力してください。";
     }
     renderItems(); refresh();
   }
@@ -633,8 +637,12 @@ async function lookup(p) {
     try { const hit = match((await callApi({ itemCode: `${p.shop}:${p.code}` })).Items); if (hit) return hit; }
     catch (e) { if (!soft(e)) throw e; }
   }
-  try { const hit = match((await callApi({ shopCode: p.shop, keyword: p.code, hits: 30 })).Items); if (hit) return hit; }
-  catch (e) { if (!soft(e)) throw e; }
+  // 「p9000000527089」のように英字の付いた商品番号は、数字部分（ページ上の「商品番号」）で引けることがある
+  const words = [...new Set([p.code, p.code.replace(/^[a-z]+(?=\d{4,}$)/i, "")])];
+  for (const kw of words) {
+    try { const hit = match((await callApi({ shopCode: p.shop, keyword: kw, hits: 30 })).Items); if (hit) return hit; }
+    catch (e) { if (!soft(e)) throw e; }
+  }
   const e = new Error("not found"); e.notFound = true; throw e;
 }
 function applyItem(it, x) {
@@ -646,7 +654,7 @@ function applyItem(it, x) {
   const base = +x.itemPrice || 0;
   it.price = x.taxFlag === 1 ? Math.round(base * (100 + (+it.tax || 10)) / 100) : base;
   it.apiRate = +x.pointRate || 1;
-  it.shopMul = it.apiRate;
+  it.shopUp = it.apiRate - 1; // APIの pointRate は通常分1倍を含む合計（「9倍UP」なら10）
   it.ptEnd = x.pointRateEndTime || "";
   it.availability = x.availability;
   it.postageFlag = x.postageFlag;
@@ -697,7 +705,7 @@ $("addBulk").addEventListener("click", () => {
   if (state.sample) { state.items = []; state.sample = false; }
   lines.forEach(u => {
     const p = parseUrl(u);
-    const it = { id: newId(), url: p.url, name: "", shop: p.shop, _autoShop: true, price: "", qty: 1, tax: 10, shopMul: 1 };
+    const it = { id: newId(), url: p.url, name: "", shop: p.shop, _autoShop: true, price: "", qty: 1, tax: 10, shopUp: 0 };
     state.items.push(it);
     enqueue(it);
   });
@@ -709,7 +717,7 @@ $("addBulk").addEventListener("click", () => {
 });
 $("addBlank").addEventListener("click", () => {
   if (state.sample) { state.items = []; state.sample = false; }
-  const it = { id: newId(), url: "", name: "", shop: "", price: "", qty: 1, tax: 10, shopMul: 1 };
+  const it = { id: newId(), url: "", name: "", shop: "", price: "", qty: 1, tax: 10, shopUp: 0 };
   state.items.push(it);
   renderItems(); refresh();
   document.getElementById("u-" + it.id)?.focus();
@@ -748,7 +756,7 @@ $("ovOn").addEventListener("change", e => { state.ovOn = e.target.checked; refre
 $("ovVal").addEventListener("input", e => { state.ovVal = e.target.value; refresh(); });
 
 renderItems(); renderRules(); renderCamp(); renderSummary();
-if (!HAS_API) $("fetchMsg").textContent = "APIキーが未設定のため、価格とショップ倍率は手入力です。";
+if (!HAS_API) $("fetchMsg").textContent = "APIキーが未設定のため、価格とショップUPは手入力です。";
 </script>
 </body>
 </html>
