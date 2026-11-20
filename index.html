@@ -195,7 +195,7 @@ body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: en
         <h2 id="h-cart">買うもの <small id="sampleTag"></small></h2>
         <div class="fld">
           <label for="bulk">商品URLを1行に1つずつ貼り付け</label>
-          <textarea id="bulk" placeholder="https://item.rakuten.co.jp/ショップ名/商品番号/&#10;https://item.rakuten.co.jp/..."></textarea>
+          <textarea id="bulk" placeholder="https://item.rakuten.co.jp/ショップ名/商品番号/&#10;https://biccamera.rakuten.co.jp/item/商品番号/"></textarea>
         </div>
         <div class="row-actions">
           <button class="primary" id="addBulk" type="button">URLから追加</button>
@@ -357,6 +357,10 @@ function parseUrl(u) {
   const host = url.hostname;
   const parts = url.pathname.split("/").filter(Boolean);
   if (/(^|\.)item\.rakuten\.co\.jp$/.test(host) && parts.length >= 1) return { url: u, shop: parts[0], code: parts[1] || "", ichiba: true };
+  if (host === "biccamera.rakuten.co.jp" && /^https?:$/.test(url.protocol)) {
+    const item = url.pathname.match(/^\/item\/([^/]+)\/?$/);
+    if (item) return { url: u, shop: "biccamera", code: item[1], ichiba: true };
+  }
   if (/books\.rakuten\.co\.jp$/.test(host)) return { url: u, shop: "楽天ブックス", code: parts.join("/") };
   if (/24\.rakuten\.co\.jp$/.test(host)) return { url: u, shop: "Rakuten24", code: parts.join("/") };
   if (/fashion\.rakuten\.co\.jp$/.test(host)) return { url: u, shop: "Rakuten Fashion", code: parts.join("/") };
@@ -638,7 +642,7 @@ function enqueue(it) {
   if (!HAS_API || !it.url) return;
   const p = parseUrl(it.url);
   if (!p || !p.ichiba || !p.code) {
-    it.status = "err"; it.errMsg = "自動取得できるのは楽天市場の商品ページ（item.rakuten.co.jp/ショップ/商品/）のURLだけです。";
+    it.status = "err"; it.errMsg = "楽天市場（item.rakuten.co.jp/ショップ/商品/）または楽天ビック（biccamera.rakuten.co.jp/item/商品番号/）の商品URLを入力してください。";
     return;
   }
   if (p.shop.startsWith("sample-")) return;
@@ -674,10 +678,14 @@ async function runQueue() {
 const SHOP_SCAN_PAGES = 10; // 30件×10ページ＝300商品まで。毎秒1件の制限があるので最大10秒ほどかかる
 async function lookup(p, onProgress) {
   // APIの itemCode は「ショップ:数字の商品ID」で、URLの商品管理番号とは別物。どちらも itemUrl で照合する
-  const want = `/${p.shop}/${p.code}/`;
-  const match = list => (list || []).find(x => (x.itemUrl || "").split("?")[0].includes(want));
+  const match = list => (list || []).find(x => {
+    const item = parseUrl(x.itemUrl);
+    return item?.ichiba && item.shop === p.shop && item.code === p.code;
+  });
   const soft = e => ["not_found", "wrong_parameter"].includes(e.code);
-  if (/^\d+$/.test(p.code)) {
+  // 楽天ビックの13桁のJANコードは、先頭の0も含めてショップ内のキーワード検索に使う。
+  const isBicJan = p.shop === "biccamera" && /^\d{13}$/.test(p.code);
+  if (!isBicJan && /^\d+$/.test(p.code)) {
     try { const hit = match((await callApi({ itemCode: `${p.shop}:${p.code}` })).Items); if (hit) return hit; }
     catch (e) { if (!soft(e)) throw e; }
   }
