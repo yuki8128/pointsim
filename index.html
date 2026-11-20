@@ -80,6 +80,9 @@ button.ghost:hover { color: var(--ink); background: var(--sunken); }
 .chip.ng { background: var(--warn-soft); color: var(--warn); }
 .item { display: grid; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
 .item:first-of-type { border-top: 0; }
+.item:has(.item-toggle input:not(:checked)) { background: var(--bg); }
+.item-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.item-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
 .item-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 108px 64px 82px 84px 34px; gap: 8px; align-items: end; }
 .item-fields label, .fld label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; white-space: nowrap; }
 .item-url { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
@@ -251,7 +254,7 @@ body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: en
         <div class="r">
           <input type="number" id="ovVal" min="0" step="0.5" aria-label="合計倍率"> <span>倍（税抜価格に対して）</span>
         </div>
-        <span class="note">オンにすると上のスイッチを無視して、カゴの税抜合計 × この倍率で計算します。</span>
+        <span class="note">オンにすると、計算に含めた商品の税抜合計に、ここで入力した倍率を掛けます。</span>
       </div>
     </aside>
   </div>
@@ -370,12 +373,23 @@ function parseUrl(u) {
 /* ---------- 計算（純関数） ---------- */
 const exOf = it => Math.floor((+it.price || 0) * (+it.qty || 0) * 100 / (100 + (+it.tax || 10)));
 const inclOf = it => (+it.price || 0) * (+it.qty || 0);
+// 切り替え状態のない既存商品・新規商品は計算に含める
+const isIncluded = it => it.included !== false;
+
+function shopKey(it) {
+  const shop = (it.shop || "").trim();
+  return shop ? "shop:" + shop : "item:" + it.id;
+}
 
 function calc(s) {
   const shops = new Map();
   s.items.forEach((it, idx) => {
-    const key = (it.shop || "").trim() || "（ショップ未入力 " + (idx + 1) + "）";
-    if (!shops.has(key)) shops.set(key, { name: key, incl: 0, ex: 0, shopPts: 0, items: [] });
+    if (!isIncluded(it)) return;
+    const key = shopKey(it);
+    if (!shops.has(key)) {
+      const name = (it.shop || "").trim() || "（ショップ未入力 " + (idx + 1) + "）";
+      shops.set(key, { key, name, incl: 0, ex: 0, shopPts: 0, items: [] });
+    }
     const g = shops.get(key);
     const ex = exOf(it), incl = inclOf(it);
     g.incl += incl; g.ex += ex; g.items.push(it);
@@ -383,6 +397,7 @@ function calc(s) {
     g.shopPts += Math.floor(ex * up / 100);
   });
   const groups = [...shops.values()];
+  const includedItems = groups.flatMap(g => g.items);
   const cartIncl = groups.reduce((a, g) => a + g.incl, 0);
   const cartEx = groups.reduce((a, g) => a + g.ex, 0);
   const lines = [];
@@ -396,7 +411,7 @@ function calc(s) {
   s.spu.filter(r => r.on).forEach(r => lines.push({ ...ruleLine(r), group: "SPU" }));
 
   const shopPts = groups.reduce((a, g) => a + g.shopPts, 0);
-  const shopUpW = cartEx ? s.items.reduce((a, it) => a + exOf(it) * Math.max(0, +it.shopUp || 0), 0) / cartEx : 0;
+  const shopUpW = cartEx ? includedItems.reduce((a, it) => a + exOf(it) * Math.max(0, +it.shopUp || 0), 0) / cartEx : 0;
   if (shopPts > 0) lines.push({ label: "ショップUP", mult: shopUpW, pts: shopPts, raw: shopPts, group: "shop" });
 
   let camp = null;
@@ -424,18 +439,18 @@ function calc(s) {
   const dispMult = override !== null ? (+s.ovVal || 0) : lines.reduce((a, l) => a + (l.mult || 0), 0);
   const capLoss = override !== null ? 0 : lines.reduce((a, l) => a + Math.max(0, (l.raw ?? l.pts) - l.pts), 0);
   return {
-    groups, cartIncl, cartEx, lines, camp, computed, override, total, dispMult, capLoss,
+    groups, itemCount: includedItems.length, cartIncl, cartEx, lines, camp, computed, override, total, dispMult, capLoss,
     rate: cartIncl ? total / cartIncl * 100 : 0,
     mult: cartEx ? total / cartEx * 100 : 0,
     net: cartIncl - total,
-    perItem: allocate(s, total - (override !== null ? 0 : shopPts), override !== null, cartEx),
+    perItem: allocate(includedItems, total - (override !== null ? 0 : shopPts), override !== null, cartEx),
   };
 }
 
 // 商品ごとの実質価格：ショップUP分はその商品に、残り（SPU・キャンペーン等）は税抜額の比率で配分する
-function allocate(s, commonPts, ignoreShopUp, cartEx) {
+function allocate(items, commonPts, ignoreShopUp, cartEx) {
   const out = {};
-  s.items.forEach(it => {
+  items.forEach(it => {
     const ex = exOf(it), incl = inclOf(it);
     const own = ignoreShopUp ? 0 : Math.floor(ex * Math.max(0, +it.shopUp || 0) / 100);
     const pts = Math.round(own + (cartEx ? commonPts * ex / cartEx : 0));
@@ -460,23 +475,22 @@ function renderItems() {
     return;
   }
   // ショップごとにまとめて表示（入力順を保つ）
-  const order = []; const map = new Map();
-  state.items.forEach((it, idx) => {
-    const k = (it.shop || "").trim() || "\u0000" + idx;
-    if (!map.has(k)) { map.set(k, []); order.push(k); }
+  const map = new Map();
+  state.items.forEach(it => {
+    const k = shopKey(it);
+    if (!map.has(k)) map.set(k, []);
     map.get(k).push(it);
   });
   box.style.display = "grid"; box.style.gap = "12px";
-  box.innerHTML = order.map(k => {
-    const its = map.get(k);
+  box.innerHTML = [...map].map(([k, its]) => {
+    const shop = (its[0].shop || "").trim();
     const named = its.find(it => it.shopName);
-    const label = k.startsWith("\u0000") ? "ショップ未入力" : named ? named.shopName : k;
+    const label = shop ? (named?.shopName || shop) : "ショップ未入力";
     return `<div class="shop" data-shop="${esc(k)}">
       <div class="shop-head"><span>🛒&#xFE0E; ${esc(label)}</span><span class="shop-stat"></span></div>
       ${its.map(it => itemHtml(it)).join("")}
     </div>`;
   }).join("");
-  updateShopHeads();
 }
 
 function itemHtml(it) {
@@ -484,8 +498,14 @@ function itemHtml(it) {
   const safeHref = it.url && /^https?:\/\//.test(it.url) ? esc(it.url) : "";
   const link = it.itemUrl && /^https:\/\//.test(it.itemUrl) ? esc(it.itemUrl) : safeHref;
   return `<div class="item" data-id="${it.id}">
-    ${it.title ? `<div class="item-title">${link ? `<a href="${link}" target="_blank" rel="noopener">${esc(it.title)}</a>` : esc(it.title)}</div>` : ""}
-    <div class="item-status">${statusHtml(it)}</div>
+    ${it.title ? `<div class="item-title" id="title-${it.id}">${link ? `<a href="${link}" target="_blank" rel="noopener">${esc(it.title)}</a>` : esc(it.title)}</div>` : ""}
+    <div class="item-bar">
+      <label class="item-toggle">
+        <span class="switch"><input type="checkbox" role="switch" id="inc-${it.id}" data-k="included" aria-labelledby="include-${it.id} ${it.title ? "title" : "n"}-${it.id}"${isIncluded(it) ? " checked" : ""}><i></i></span>
+        <span id="include-${it.id}">計算に含める</span>
+      </label>
+      <div class="item-status">${statusHtml(it)}</div>
+    </div>
     <div class="item-url">
       <div class="fld"><label for="u-${it.id}">商品URL</label><input type="url" id="u-${it.id}" data-k="url" value="${esc(it.url)}" placeholder="https://item.rakuten.co.jp/..."></div>
       ${safeHref ? `<a href="${safeHref}" target="_blank" rel="noopener">ページを開く ↗</a>` : "<span></span>"}
@@ -503,18 +523,14 @@ function itemHtml(it) {
   </div>`;
 }
 
-function updateShopHeads() {
-  const r = calc(state);
-  const byName = new Map(r.groups.map(g => [g.name, g]));
+function updateShopHeads(groups) {
+  const byKey = new Map(groups.map(g => [g.key, g]));
   document.querySelectorAll(".shop").forEach(el => {
-    const k = el.dataset.shop;
-    const firstItem = state.items.find(it => it.id === el.querySelector(".item")?.dataset.id);
-    const idx = state.items.indexOf(firstItem);
-    const key = k.startsWith("\u0000") ? "（ショップ未入力 " + (idx + 1) + "）" : k;
-    const g = byName.get(key);
-    if (!g) return;
+    const stat = el.querySelector(".shop-stat");
+    const g = byKey.get(el.dataset.shop);
+    if (!g) { stat.textContent = "計算対象外"; return; }
     const ok = g.incl >= 1000;
-    el.querySelector(".shop-stat").innerHTML = `<b>${yen(g.incl)}</b> ` +
+    stat.innerHTML = `<b>${yen(g.incl)}</b> ` +
       (state.mode === "none" ? "" : ok ? '<span class="chip ok">買いまわり対象</span>' : `<span class="chip ng">あと${yen(1000 - g.incl)}で対象</span>`);
   });
 }
@@ -553,7 +569,7 @@ function renderSummary() {
   $("receipt").innerHTML = `
     <div class="kicker">獲得予定ポイント</div>
     <div class="big"><b>${num(r.total)}</b><span>pt</span></div>
-    <div class="kicker">${state.items.length}商品・${r.groups.length}ショップ／お支払い ${yen(r.cartIncl)}（税抜 ${yen(r.cartEx)}）</div>
+    <div class="kicker">計算対象 ${r.itemCount}商品・${r.groups.length}ショップ／お支払い ${yen(r.cartIncl)}（税抜 ${yen(r.cartEx)}）</div>
     <div class="kpis">
       <div><small>表示倍率（上限なし）</small><b>${fmtMul(r.dispMult)}倍</b><small>楽天の「ポイント○倍」と同じ数え方</small></div>
       <div><small>実質倍率（上限込み）</small><b>${fmtMul(r.mult)}倍</b>${r.capLoss > 0 ? `<small class="loss">上限で −${num(r.capLoss)}pt</small>` : "<small>上限による目減りなし</small>"}</div>
@@ -573,7 +589,7 @@ function renderSummary() {
       (e.qty > 1 ? `<span>（1個あたり ${yen(e.unit)}）</span>` : "") +
       `<span class="sub">${yen(e.incl)} − ${num(e.pts)}pt・${fmtMul(e.mult)}倍</span>`;
   });
-  updateShopHeads();
+  updateShopHeads(r.groups);
 }
 
 function renderHints(r) {
@@ -726,12 +742,21 @@ function applyItem(it, x) {
 }
 
 /* ---------- イベント ---------- */
+function regroupAfterEdit() {
+  const box = $("items");
+  // ショップ・URL欄を離れた時、押下中のトグルがクリック前に消えないようにする
+  if (box.matches(":active")) { requestAnimationFrame(regroupAfterEdit); return; }
+  const focusId = box.contains(document.activeElement) ? document.activeElement.id : "";
+  renderItems(); refresh();
+  if (focusId) $(focusId)?.focus({ preventScroll: true });
+}
+
 $("items").addEventListener("input", e => {
   const el = e.target, row = el.closest(".item"); if (!row || !el.dataset.k) return;
   const it = state.items.find(x => x.id === row.dataset.id); if (!it) return;
   const k = el.dataset.k;
-  it[k] = el.type === "number" ? el.value : el.value;
-  state.sample = false;
+  it[k] = el.type === "checkbox" ? el.checked : el.value;
+  if (k !== "included") state.sample = false;
   if (k === "url") {
     const p = parseUrl(el.value);
     if (p && p.shop && (!it.shop || it._autoShop)) { it.shop = p.shop; it._autoShop = true; row.querySelector('[data-k="shop"]').value = p.shop; }
@@ -746,7 +771,7 @@ $("items").addEventListener("change", e => {
     const it = state.items.find(x => x.id === e.target.closest(".item")?.dataset.id);
     if (it) { it.title = ""; it.shopName = ""; it.status = ""; enqueue(it); }
   }
-  if (k === "shop" || k === "url") { renderItems(); refresh(); }
+  if (k === "shop" || k === "url") requestAnimationFrame(regroupAfterEdit);
 });
 $("refetch").addEventListener("click", () => {
   if (!HAS_API) { $("fetchMsg").textContent = "APIキーが設定されていないため、自動取得は使えません。"; return; }
