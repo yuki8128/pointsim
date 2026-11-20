@@ -98,6 +98,9 @@ button.ghost:hover { color: var(--ink); background: var(--sunken); }
   .item-fields .f-del { grid-column: span 1; }
 }
 .del { padding: 6px; width: 34px; height: 36px; line-height: 1; }
+.item-payment { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 16px; }
+.item-payment input { width: 9em; }
+.item-payment output { display: block; padding-block: 7px; font: 600 16px/1.6 var(--font-num); }
 .item-eff { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; padding: 8px 10px; border-radius: 7px; background: var(--accent-soft); font-variant-numeric: tabular-nums; }
 .item-eff:empty { display: none; }
 .item-eff b { font-family: var(--font-num); font-size: 17px; font-weight: 600; color: var(--ink); }
@@ -143,6 +146,9 @@ button.ghost:hover { color: var(--ink); background: var(--sunken); }
   -webkit-mask: radial-gradient(circle 7px at 8px 100%, transparent 6.5px, #000 7px) 0 0 / 16px 100% repeat-x;
           mask: radial-gradient(circle 7px at 8px 100%, transparent 6.5px, #000 7px) 0 0 / 16px 100% repeat-x; }
 .receipt .kicker { font-family: var(--font-body); font-size: 12px; color: var(--muted); letter-spacing: .1em; }
+.payment-totals { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 10px 0; }
+.payment-totals dt { font-family: var(--font-body); }
+.payment-totals dd { margin: 0; text-align: right; font-weight: 600; }
 .big { display: flex; align-items: baseline; gap: 6px; margin: 2px 0 2px; }
 .big b { font-size: 44px; font-weight: 600; line-height: 1.1; letter-spacing: -.02em; background: linear-gradient(transparent 62%, var(--marker) 62%); font-variant-numeric: tabular-nums; }
 .big span { font-family: var(--font-body); font-size: 14px; }
@@ -260,8 +266,9 @@ body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: en
   </div>
 
   <footer>
-    <span>ポイントは税抜価格を基準に、楽天カード通常分のみ税込のカード請求額を基準に計算しています。端数はショップごとに切り捨てです。</span>
-    <span>クーポン値引き、送料、ポイント利用分、月内にすでに使った上限枠は反映していません。実際の付与は楽天の判定に従います。キャンペーンの条件は<a href="https://event.rakuten.co.jp/campaign/point-up/everyday/point/" target="_blank" rel="noopener">SPUの公式ページ</a>などで確認してください。</span>
+    <span>利用ポイントは1pt＝1円です。通常ポイント・ショップUP・買いまわりにはポイントで支払った分も含みます。</span>
+    <span>同じショップの商品は1注文として計算します。楽天カード通常分は税込額から、カード特典分・楽天銀行＋楽天カード・5と0のつく日は税抜額から利用ポイントを引き、ショップごとに端数を切り捨てます。<a href="https://ichiba.faq.rakuten.net/detail/000031091" target="_blank" rel="noopener">楽天市場の計算例</a></span>
+    <span>クーポン値引き、送料、月内にすでに使った上限枠は反映していません。実際の付与は楽天の判定に従います。キャンペーンの条件は<a href="https://event.rakuten.co.jp/campaign/point-up/everyday/point/" target="_blank" rel="noopener">SPUの公式ページ</a>などで確認してください。</span>
     <span>このツールは個人が制作・運営しているもので、楽天グループ株式会社とは関係ありません。計算結果によって生じた損害について制作者は責任を負いません。入力内容はお使いのブラウザ内にだけ保存され、外部のサーバーには送信しません（商品情報の取得で楽天ウェブサービスに商品コードを問い合わせる場合を除く）。</span>
     <span class="credit">
       <a href="https://www.rakuten.co.jp/" target="_blank" rel="noopener">楽天市場</a>
@@ -283,12 +290,12 @@ const HAS_API = !!(CFG.applicationId && CFG.accessKey);
 
 const DEFAULT_SPU = [
   { key: "base", name: "楽天市場 通常ポイント", note: "全員", bonus: 1, cap: 0, on: true, fixed: true },
-  { key: "card", name: "楽天カード（通常分）", note: "税込の請求額が基準", bonus: 1, cap: 0, on: true, basis: "incl" },
-  { key: "cardsp", name: "楽天カード（特典分）", note: "プレミアムカードは上限5,000pt", bonus: 1, cap: 1000, on: true },
+  { key: "card", name: "楽天カード（通常分）", note: "税込の請求額が基準", bonus: 1, cap: 0, on: true, basis: "cardIncl" },
+  { key: "cardsp", name: "楽天カード（特典分）", note: "プレミアムカードは上限5,000pt", bonus: 1, cap: 1000, on: true, basis: "cardEx" },
   { key: "mobile", name: "楽天モバイル", note: "最強プラン契約・要エントリー", bonus: 4, cap: 2000, on: true },
   { key: "carrier", name: "楽天モバイルキャリア決済", note: "Androidで月2,000円以上・要エントリー", bonus: 2, cap: 1000, on: false },
   { key: "hikari", name: "Rakuten Turbo／楽天ひかり", note: "要エントリー・上限は公式で確認", bonus: 2, cap: 0, on: false },
-  { key: "bank", name: "楽天銀行＋楽天カード", note: "引落+0.3／給与受取で+0.2", bonus: 0.5, cap: 1000, on: false },
+  { key: "bank", name: "楽天銀行＋楽天カード", note: "引落+0.3／給与受取で+0.2", bonus: 0.5, cap: 1000, on: false, basis: "cardEx" },
   { key: "fund", name: "楽天証券 投資信託", note: "月3万円以上ポイント投資", bonus: 0.5, cap: 2000, on: false },
   { key: "us", name: "楽天証券 米国株式", note: "月3万円以上（円貨決済）", bonus: 0.5, cap: 2000, on: false },
   { key: "wallet", name: "楽天ウォレット", note: "暗号資産 月3万円以上", bonus: 0.5, cap: 1000, on: false },
@@ -305,7 +312,7 @@ const DEFAULT_SPU = [
 ];
 
 const DEFAULT_EXTRAS = [
-  { key: "five", name: "5と0のつく日", note: "楽天カード決済・当日エントリー／上限は月", bonus: 1, cap: 1000, on: true },
+  { key: "five", name: "5と0のつく日", note: "楽天カード決済・当日エントリー／上限は月", bonus: 1, cap: 1000, on: true, basis: "cardEx" },
   { key: "rakuma", name: "買いまわり（ラクマ特典）", note: "マラソン中・ラクマ利用でエントリー", bonus: 1, cap: 1500, on: false },
   { key: "win", name: "勝ったら倍", note: "イーグルス・ヴィッセル等の勝利翌日", bonus: 1, cap: 1000, on: false },
   { key: "wonder", name: "ワンダフルデー", note: "毎月1日・エントリー（開催時のみ）", bonus: 2, cap: 1000, on: false },
@@ -325,7 +332,7 @@ const newId = () => "i" + (uid++) + Date.now().toString(36);
 function defaultState() {
   return {
     sample: true,
-    items: SAMPLE_ITEMS.map(x => ({ id: newId(), ...x })),
+    items: SAMPLE_ITEMS.map(x => ({ id: newId(), pointsUsed: 0, ...x })),
     mode: "marathon", priorShops: 0, priorEx: 0, campCap: 7000,
     spu: DEFAULT_SPU.map(x => ({ ...x })),
     extras: DEFAULT_EXTRAS.map(x => ({ ...x })),
@@ -343,8 +350,12 @@ function loadState() {
     const savedSpu = Object.fromEntries((s.spu || []).map(r => [r.key, r]));
     s.spu = d.spu.map(r => savedSpu[r.key] ? { ...r, on: savedSpu[r.key].on, bonus: savedSpu[r.key].bonus, cap: savedSpu[r.key].cap } : r);
     s.extras = s.extras || d.extras;
-    d.extras.forEach(r => { if (!s.extras.some(x => x.key === r.key)) s.extras.push(r); });
-    s.items = (s.items || []).map(it => ({ ...it, id: newId(), status: it.status === "loading" ? "" : it.status, shopUp: it.shopUp ?? Math.max(0, (+it.shopMul || 1) - 1) }));
+    d.extras.forEach(r => {
+      const saved = s.extras.find(x => x.key === r.key);
+      if (saved) saved.basis = r.basis;
+      else s.extras.push(r);
+    });
+    s.items = (s.items || []).map(it => ({ ...it, id: newId(), pointsUsed: pointsUsedOf(it), status: it.status === "loading" ? "" : it.status, shopUp: it.shopUp ?? Math.max(0, (+it.shopMul || 1) - 1) }));
     return { ...d, ...s };
   } catch (e) { return defaultState(); }
 }
@@ -371,8 +382,43 @@ function parseUrl(u) {
 }
 
 /* ---------- 計算（純関数） ---------- */
-const exOf = it => Math.floor((+it.price || 0) * (+it.qty || 0) * 100 / (100 + (+it.tax || 10)));
-const inclOf = it => (+it.price || 0) * (+it.qty || 0);
+function inclOf(it) {
+  return Math.max(0, +it.price || 0) * Math.max(0, +it.qty || 0);
+}
+const exOf = it => Math.floor(inclOf(it) * 100 / (100 + (+it.tax || 10)));
+
+function pointsUsedOf(it) {
+  const requested = Number(it.pointsUsed);
+  return Number.isFinite(requested) ? Math.max(0, Math.floor(Math.min(requested, inclOf(it)))) : 0;
+}
+
+function rewardBasis(amounts, basis) {
+  if (basis === "cardIncl") return amounts.incl - amounts.used;
+  if (basis === "cardEx") return Math.max(0, amounts.ex - amounts.used);
+  return amounts.ex;
+}
+
+// 比例配分で残った1ptは端数の大きい順に配り、商品の獲得ポイントとカゴの合計を一致させる。
+function splitPoints(points, weights) {
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  if (!totalWeight) return weights.map(() => 0);
+  const quotas = weights.map(weight => points * weight / totalWeight);
+  const shares = quotas.map(Math.floor);
+  const remaining = Math.round(points) - shares.reduce((sum, share) => sum + share, 0);
+  if (remaining > 0) {
+    const remainders = quotas.map((quota, i) => ({ i, fraction: quota - shares[i] }));
+    remainders.sort((a, b) => b.fraction - a.fraction);
+    for (const { i } of remainders.slice(0, remaining)) shares[i]++;
+  }
+  return shares;
+}
+
+function allocate(items, points, basis) {
+  if (!points) return;
+  const shares = splitPoints(points, items.map(it => rewardBasis(it, basis)));
+  items.forEach((it, i) => { it.pts += shares[i]; });
+}
+
 // 切り替え状態のない既存商品・新規商品は計算に含める
 const isIncluded = it => it.included !== false;
 
@@ -383,29 +429,38 @@ function shopKey(it) {
 
 function calc(s) {
   const shops = new Map();
+  const perItem = {};
   s.items.forEach((it, idx) => {
     if (!isIncluded(it)) return;
     const key = shopKey(it);
     if (!shops.has(key)) {
       const name = (it.shop || "").trim() || "（ショップ未入力 " + (idx + 1) + "）";
-      shops.set(key, { key, name, incl: 0, ex: 0, shopPts: 0, items: [] });
+      shops.set(key, { key, name, incl: 0, ex: 0, used: 0, shopPts: 0, items: [] });
     }
     const g = shops.get(key);
-    const ex = exOf(it), incl = inclOf(it);
-    g.incl += incl; g.ex += ex; g.items.push(it);
-    const up = Math.max(0, +it.shopUp || 0);
-    g.shopPts += Math.floor(ex * up / 100);
+    const ex = exOf(it), incl = inclOf(it), used = pointsUsedOf(it);
+    const shopPts = Math.floor(ex * Math.max(0, +it.shopUp || 0) / 100);
+    perItem[it.id] = { incl, ex, used, qty: Math.max(1, +it.qty || 1), pts: s.ovOn ? 0 : shopPts };
+    g.items.push(it);
+    g.incl += incl; g.ex += ex; g.used += used; g.shopPts += shopPts;
   });
   const groups = [...shops.values()];
   const includedItems = groups.flatMap(g => g.items);
   const cartIncl = groups.reduce((a, g) => a + g.incl, 0);
   const cartEx = groups.reduce((a, g) => a + g.ex, 0);
+  const used = groups.reduce((a, g) => a + g.used, 0);
   const lines = [];
 
   const ruleLine = (r) => {
-    const raw = groups.reduce((a, g) => a + Math.floor((r.basis === "incl" ? g.incl : g.ex) * (+r.bonus || 0) / 100), 0);
+    const byShop = groups.map(g => Math.floor(rewardBasis(g, r.basis) * (+r.bonus || 0) / 100));
+    const raw = byShop.reduce((a, pts) => a + pts, 0);
     const cap = +r.cap || 0;
     const pts = cap > 0 ? Math.min(raw, cap) : raw;
+    // ポイント払いがあるときは、カード特典を各ショップ内のカード決済対象額に応じて配分する。
+    if (used && r.basis && pts && !s.ovOn) {
+      const shares = splitPoints(pts, byShop);
+      groups.forEach((g, i) => allocate(g.items.map(it => perItem[it.id]), shares[i], r.basis));
+    }
     return { label: r.name, mult: +r.bonus || 0, pts, capped: cap > 0 && raw > cap, raw };
   };
   s.spu.filter(r => r.on).forEach(r => lines.push({ ...ruleLine(r), group: "SPU" }));
@@ -435,6 +490,14 @@ function calc(s) {
   const computed = lines.reduce((a, l) => a + l.pts, 0);
   const override = s.ovOn ? Math.floor(cartEx * (+s.ovVal || 0) / 100) : null;
   const total = override ?? computed;
+  const items = Object.values(perItem);
+  // 配分済みの特典を除いた残りと、手入力倍率のポイントは税抜商品額の比率で配分する。
+  allocate(items, total - items.reduce((sum, it) => sum + it.pts, 0));
+  items.forEach(it => {
+    it.net = it.incl - it.pts;
+    it.unit = it.net / it.qty;
+    it.mult = it.ex ? it.pts / it.ex * 100 : 0;
+  });
   // 楽天の「今この商品はポイント○倍」と同じく、上限を考えない倍率の単純合計
   const dispMult = override !== null ? (+s.ovVal || 0) : lines.reduce((a, l) => a + (l.mult || 0), 0);
   const capLoss = override !== null ? 0 : lines.reduce((a, l) => a + Math.max(0, (l.raw ?? l.pts) - l.pts), 0);
@@ -443,21 +506,8 @@ function calc(s) {
     rate: cartIncl ? total / cartIncl * 100 : 0,
     mult: cartEx ? total / cartEx * 100 : 0,
     net: cartIncl - total,
-    perItem: allocate(includedItems, total - (override !== null ? 0 : shopPts), override !== null, cartEx),
+    used, payable: cartIncl - used, perItem,
   };
-}
-
-// 商品ごとの実質価格：ショップUP分はその商品に、残り（SPU・キャンペーン等）は税抜額の比率で配分する
-function allocate(items, commonPts, ignoreShopUp, cartEx) {
-  const out = {};
-  items.forEach(it => {
-    const ex = exOf(it), incl = inclOf(it);
-    const own = ignoreShopUp ? 0 : Math.floor(ex * Math.max(0, +it.shopUp || 0) / 100);
-    const pts = Math.round(own + (cartEx ? commonPts * ex / cartEx : 0));
-    const qty = Math.max(1, +it.qty || 1);
-    out[it.id] = { pts, net: incl - pts, unit: (incl - pts) / qty, qty, mult: ex ? pts / ex * 100 : 0, incl };
-  });
-  return out;
 }
 
 /* ---------- 描画 ---------- */
@@ -491,6 +541,7 @@ function renderItems() {
       ${its.map(it => itemHtml(it)).join("")}
     </div>`;
   }).join("");
+  state.items.forEach(updateItemPayment);
 }
 
 function itemHtml(it) {
@@ -519,8 +570,20 @@ function itemHtml(it) {
       <div class="f-mul"><label for="x-${it.id}">ショップUP（+倍）</label><input type="number" id="x-${it.id}" data-k="shopUp" min="0" step="1" value="${esc(it.shopUp)}"></div>
       <div class="f-del"><button type="button" class="ghost del" data-del="${it.id}" aria-label="この商品を削除">✕</button></div>
     </div>
+    <div class="item-payment">
+      <div class="fld"><label for="used-${it.id}">利用ポイント（個数分の合計）</label><input type="number" inputmode="numeric" id="used-${it.id}" data-k="pointsUsed" min="0" step="1" placeholder="0"></div>
+      <div class="fld"><label for="due-${it.id}">残り支払額</label><output id="due-${it.id}" for="p-${it.id} q-${it.id} used-${it.id}"></output></div>
+    </div>
     <div class="item-eff" data-eff="${it.id}"></div>
   </div>`;
+}
+
+function updateItemPayment(it) {
+  const incl = inclOf(it), used = pointsUsedOf(it);
+  const input = $("used-" + it.id);
+  input.max = Math.floor(incl);
+  if (+input.value !== used) input.value = used || "";
+  $("due-" + it.id).value = yen(incl - used);
 }
 
 function updateShopHeads(groups) {
@@ -569,12 +632,16 @@ function renderSummary() {
   $("receipt").innerHTML = `
     <div class="kicker">獲得予定ポイント</div>
     <div class="big"><b>${num(r.total)}</b><span>pt</span></div>
-    <div class="kicker">計算対象 ${r.itemCount}商品・${r.groups.length}ショップ／お支払い ${yen(r.cartIncl)}（税抜 ${yen(r.cartEx)}）</div>
+    <div class="kicker">計算対象 ${r.itemCount}商品・${r.groups.length}ショップ／商品合計 ${yen(r.cartIncl)}（税抜 ${yen(r.cartEx)}）</div>
+    <dl class="payment-totals">
+      <dt>利用ポイント</dt><dd>${num(r.used)} pt</dd>
+      <dt>残り支払額</dt><dd>${yen(r.payable)}</dd>
+    </dl>
     <div class="kpis">
       <div><small>表示倍率（上限なし）</small><b>${fmtMul(r.dispMult)}倍</b><small>楽天の「ポイント○倍」と同じ数え方</small></div>
       <div><small>実質倍率（上限込み）</small><b>${fmtMul(r.mult)}倍</b>${r.capLoss > 0 ? `<small class="loss">上限で −${num(r.capLoss)}pt</small>` : "<small>上限による目減りなし</small>"}</div>
       <div><small>還元率（税込比）</small><b>${(Math.round(r.rate * 10) / 10).toFixed(1)}%</b></div>
-      <div><small>ポイント差引後</small><b>${yen(r.net)}</b></div>
+      <div><small>実質価格</small><b>${yen(r.net)}</b><small>商品合計 − 獲得ポイント</small></div>
     </div>
     <table class="lines">
       ${rows}
@@ -585,9 +652,9 @@ function renderSummary() {
   document.querySelectorAll("[data-eff]").forEach(el => {
     const e = r.perItem[el.dataset.eff];
     if (!e || !e.incl) { el.innerHTML = ""; return; }
-    el.innerHTML = `<span>実質</span><b>${yen(e.net)}</b>` +
+    el.innerHTML = `<span>実質価格</span><b>${yen(e.net)}</b>` +
       (e.qty > 1 ? `<span>（1個あたり ${yen(e.unit)}）</span>` : "") +
-      `<span class="sub">${yen(e.incl)} − ${num(e.pts)}pt・${fmtMul(e.mult)}倍</span>`;
+      `<span class="sub">${yen(e.incl)} − 獲得 ${num(e.pts)}pt・${fmtMul(e.mult)}倍</span>`;
   });
   updateShopHeads(r.groups);
 }
@@ -731,6 +798,7 @@ function applyItem(it, x) {
   it.shopName = x.shopName || "";
   const base = +x.itemPrice || 0;
   it.price = x.taxFlag === 1 ? Math.round(base * (100 + (+it.tax || 10)) / 100) : base;
+  it.pointsUsed = pointsUsedOf(it);
   it.apiRate = +x.pointRate || 1;
   it.shopUp = it.apiRate - 1; // APIの pointRate は通常分1倍を含む合計（「9倍UP」なら10）
   it.ptEnd = x.pointRateEndTime || "";
@@ -756,6 +824,8 @@ $("items").addEventListener("input", e => {
   const it = state.items.find(x => x.id === row.dataset.id); if (!it) return;
   const k = el.dataset.k;
   it[k] = el.type === "checkbox" ? el.checked : el.value;
+  if (k === "pointsUsed") it.pointsUsed = pointsUsedOf(it);
+  if (k === "pointsUsed" || k === "price" || k === "qty") updateItemPayment(it);
   if (k !== "included") state.sample = false;
   if (k === "url") {
     const p = parseUrl(el.value);
@@ -767,6 +837,11 @@ $("items").addEventListener("input", e => {
 $("items").addEventListener("change", e => {
   // ショップ名が変わったらグループ表示を組み直す
   const k = e.target.dataset.k;
+  if (k === "price" || k === "qty") {
+    // 桁を打ち直している途中では利用ポイントを失わないよう、編集の確定時に上限を保存する。
+    const it = state.items.find(x => x.id === e.target.closest(".item")?.dataset.id);
+    if (it) { it.pointsUsed = pointsUsedOf(it); save(); }
+  }
   if (k === "url") {
     const it = state.items.find(x => x.id === e.target.closest(".item")?.dataset.id);
     if (it) { it.title = ""; it.shopName = ""; it.status = ""; enqueue(it); }
@@ -792,7 +867,7 @@ $("addBulk").addEventListener("click", () => {
   if (state.sample) { state.items = []; state.sample = false; }
   lines.forEach(u => {
     const p = parseUrl(u);
-    const it = { id: newId(), url: p.url, name: "", shop: p.shop, _autoShop: true, price: "", qty: 1, tax: 10, shopUp: 0 };
+    const it = { id: newId(), url: p.url, name: "", shop: p.shop, _autoShop: true, price: "", qty: 1, tax: 10, shopUp: 0, pointsUsed: 0 };
     state.items.push(it);
     enqueue(it);
   });
@@ -804,7 +879,7 @@ $("addBulk").addEventListener("click", () => {
 });
 $("addBlank").addEventListener("click", () => {
   if (state.sample) { state.items = []; state.sample = false; }
-  const it = { id: newId(), url: "", name: "", shop: "", price: "", qty: 1, tax: 10, shopUp: 0 };
+  const it = { id: newId(), url: "", name: "", shop: "", price: "", qty: 1, tax: 10, shopUp: 0, pointsUsed: 0 };
   state.items.push(it);
   renderItems(); refresh();
   document.getElementById("u-" + it.id)?.focus();
